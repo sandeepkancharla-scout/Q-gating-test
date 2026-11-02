@@ -1,0 +1,28 @@
+name: CT Jira Webhook Test
+
+on:
+  repository_dispatch:
+    types:
+      - ct_test_execution
+
+jobs:
+  receive-jira:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Display Jira request
+        shell: bash
+        env:
+          JIRA_KEY: ${{ github.event.client_payload.jira_key }}
+          BENCH_ID: ${{ github.event.client_payload.bench_id }}
+          BENCH_NAME: ${{ github.event.client_payload.bench_name }}
+          TEST_CASES: ${{ github.event.client_payload.test_cases }}
+        run: |
+          echo "====================================="
+          echo "JIRA CT REQUEST RECEIVED"
+          echo "====================================="
+          echo "Jira Key   : $JIRA_KEY"
+          echo "Bench ID   : $BENCH_ID"
+          echo "Bench Name : $BENCH_NAME"
+          echo "Test Cases : $TEST_CASES"
+          echo "====================================="
