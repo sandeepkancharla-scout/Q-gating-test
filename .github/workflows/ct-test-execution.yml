@@ -29,9 +29,11 @@ jobs:
           echo "Target ECU : $TARGET_ECU"
           
 
-          if[-z "$TARGET_ECU"];then
+          if[-z "$TARGET_ECU"]; then
             echo "ERROR: Target ECU missing"
             exit 1
+          fi
+          
           if [ -z "$JIRA_KEY" ]; then
             echo "ERROR: Jira Key missing"
             exit 1
