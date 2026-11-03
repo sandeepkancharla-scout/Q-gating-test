@@ -1,4 +1,4 @@
-name: CT Jira Webhook Test
+name: CT Test Execution
 
 on:
   repository_dispatch:
@@ -10,7 +10,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Display Jira request
+      # Read and validate the Jira request.
+      - name: Read Jira payload
         shell: bash
         env:
           JIRA_KEY: ${{ github.event.client_payload.jira_key }}
@@ -18,11 +19,29 @@ jobs:
           BENCH_NAME: ${{ github.event.client_payload.bench_name }}
           TEST_CASES: ${{ github.event.client_payload.test_cases }}
         run: |
-          echo "====================================="
-          echo "JIRA CT REQUEST RECEIVED"
-          echo "====================================="
+          set -euo pipefail
+
           echo "Jira Key   : $JIRA_KEY"
           echo "Bench ID   : $BENCH_ID"
           echo "Bench Name : $BENCH_NAME"
           echo "Test Cases : $TEST_CASES"
-          echo "====================================="
+
+          if [ -z "$JIRA_KEY" ]; then
+            echo "ERROR: Jira Key missing"
+            exit 1
+          fi
+
+          if [ -z "$BENCH_ID" ]; then
+            echo "ERROR: Bench ID missing"
+            exit 1
+          fi
+
+          if [ -z "$BENCH_NAME" ]; then
+            echo "ERROR: Bench Name missing"
+            exit 1
+          fi
+
+          if [ -z "$TEST_CASES" ]; then
+            echo "ERROR: Test Cases missing"
+            exit 1
+          fi
