@@ -10,45 +10,66 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Read and validate the Jira request.
-      - name: Read Jira payload
+      # Validate Jira payload.
+      - name: Validate Jira payload
         shell: bash
         env:
           JIRA_KEY: ${{ github.event.client_payload.jira_key }}
           BENCH_ID: ${{ github.event.client_payload.bench_id }}
           BENCH_NAME: ${{ github.event.client_payload.bench_name }}
+          TARGET_ECU: ${{ github.event.client_payload.target_ecu }}
           TEST_CASES: ${{ github.event.client_payload.test_cases }}
-          TARGET_ECU: ${{github.event.client_payload.target_ECU }}
         run: |
           set -euo pipefail
 
           echo "Jira Key   : $JIRA_KEY"
           echo "Bench ID   : $BENCH_ID"
           echo "Bench Name : $BENCH_NAME"
-          echo "Test Cases : $TEST_CASES"
           echo "Target ECU : $TARGET_ECU"
-          
-          if [ -z "$TARGET_ECU" ]; then
-            echo "ERROR: Target ECU missing"
-            exit 1
-          fi
-          
-          if [ -z "$JIRA_KEY" ]; then
-            echo "ERROR: Jira Key missing"
-            exit 1
-          fi
+          echo "Test Cases : $TEST_CASES"
 
-          if [ -z "$BENCH_ID" ]; then
-            echo "ERROR: Bench ID missing"
-            exit 1
-          fi
+          [ -n "$JIRA_KEY" ] || { echo "ERROR: Jira Key missing"; exit 1; }
+          [ -n "$BENCH_ID" ] || { echo "ERROR: Bench ID missing"; exit 1; }
+          [ -n "$BENCH_NAME" ] || { echo "ERROR: Bench Name missing"; exit 1; }
+          [ -n "$TARGET_ECU" ] || { echo "ERROR: Target ECU missing"; exit 1; }
+          [ -n "$TEST_CASES" ] || { echo "ERROR: Test Cases missing"; exit 1; }
 
-          if [ -z "$BENCH_NAME" ]; then
-            echo "ERROR: Bench Name missing"
-            exit 1
-          fi
+          echo "Payload validation successful."
 
-          if [ -z "$TEST_CASES" ]; then
-            echo "ERROR: Test Cases missing"
-            exit 1
-          fi
+      # Parse comma-separated test cases.
+      - name: Parse test cases
+        shell: bash
+        env:
+          TEST_CASES: ${{ github.event.client_payload.test_cases }}
+        run: |
+          set -euo pipefail
+
+          IFS=',' read -ra TC_LIST <<< "$TEST_CASES"
+
+          echo "Requested Test Cases:"
+
+          for tc in "${TC_LIST[@]}"; do
+            tc="$(echo "$tc" | xargs)"
+            [ -n "$tc" ] && echo "- $tc"
+          done
+
+      # Show request summary.
+      - name: Summary
+        shell: bash
+        env:
+          JIRA_KEY: ${{ github.event.client_payload.jira_key }}
+          BENCH_ID: ${{ github.event.client_payload.bench_id }}
+          BENCH_NAME: ${{ github.event.client_payload.bench_name }}
+          TARGET_ECU: ${{ github.event.client_payload.target_ecu }}
+          TEST_CASES: ${{ github.event.client_payload.test_cases }}
+        run: |
+          {
+            echo "## CT Execution Request"
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Jira | $JIRA_KEY |"
+            echo "| Bench ID | $BENCH_ID |"
+            echo "| Bench Name | $BENCH_NAME |"
+            echo "| Target ECU | $TARGET_ECU |"
+            echo "| Test Cases | $TEST_CASES |"
+          } >> "$GITHUB_STEP_SUMMARY"
