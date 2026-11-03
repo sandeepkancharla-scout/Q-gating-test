@@ -18,6 +18,7 @@ jobs:
           BENCH_ID: ${{ github.event.client_payload.bench_id }}
           BENCH_NAME: ${{ github.event.client_payload.bench_name }}
           TEST_CASES: ${{ github.event.client_payload.test_cases }}
+          TARGET_ECU: ${{github.event.client_payload.target_ECU }}
         run: |
           set -euo pipefail
 
@@ -25,7 +26,12 @@ jobs:
           echo "Bench ID   : $BENCH_ID"
           echo "Bench Name : $BENCH_NAME"
           echo "Test Cases : $TEST_CASES"
+          echo "Target ECU : $TARGET_ECU"
+          
 
+          if[-z "$TARGET_ECU"];then
+            echo "ERROR: Target ECU missing"
+            exit 1
           if [ -z "$JIRA_KEY" ]; then
             echo "ERROR: Jira Key missing"
             exit 1
