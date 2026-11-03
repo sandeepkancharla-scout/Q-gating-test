@@ -28,8 +28,7 @@ jobs:
           echo "Test Cases : $TEST_CASES"
           echo "Target ECU : $TARGET_ECU"
           
-
-          if[-z "$TARGET_ECU"]; then
+          if [ -z "$TARGET_ECU" ]; then
             echo "ERROR: Target ECU missing"
             exit 1
           fi
