@@ -6,11 +6,11 @@ on:
       - ct_test_execution
 
 jobs:
-  receive-jira:
+  validate-request:
     runs-on: ubuntu-latest
 
     steps:
-      # Validate Jira payload.
+      # Validate the Jira payload.
       - name: Validate Jira payload
         shell: bash
         env:
@@ -36,7 +36,7 @@ jobs:
 
           echo "Payload validation successful."
 
-      # Parse comma-separated test cases.
+      # Parse requested test cases.
       - name: Parse test cases
         shell: bash
         env:
@@ -53,23 +53,280 @@ jobs:
             [ -n "$tc" ] && echo "- $tc"
           done
 
-      # Show request summary.
-      - name: Summary
-        shell: bash
-        env:
-          JIRA_KEY: ${{ github.event.client_payload.jira_key }}
-          BENCH_ID: ${{ github.event.client_payload.bench_id }}
-          BENCH_NAME: ${{ github.event.client_payload.bench_name }}
-          TARGET_ECU: ${{ github.event.client_payload.target_ecu }}
-          TEST_CASES: ${{ github.event.client_payload.test_cases }}
+  run-ecu-test:
+    needs: validate-request
+
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+
+    env:
+      JIRA_KEY: ${{ github.event.client_payload.jira_key }}
+      BENCH_ID: ${{ github.event.client_payload.bench_id }}
+      BENCH_NAME: ${{ github.event.client_payload.bench_name }}
+      TARGET_ECU: ${{ github.event.client_payload.target_ecu }}
+      TEST_CASES: ${{ github.event.client_payload.test_cases }}
+
+    steps:
+      # Checkout latest System HIL main.
+      - name: Checkout System HIL
+        uses: actions/checkout@v4
+        with:
+          repository: scout-motors/eeint-system-hil
+          ref: main
+          fetch-depth: 1
+          token: ${{ secrets.HIL_REPO_PAT }}
+          path: system-hil
+
+      # Verify the incoming execution request.
+      - name: Show execution request
+        shell: powershell
         run: |
-          {
-            echo "## CT Execution Request"
-            echo "| Field | Value |"
-            echo "|---|---|"
-            echo "| Jira | $JIRA_KEY |"
-            echo "| Bench ID | $BENCH_ID |"
-            echo "| Bench Name | $BENCH_NAME |"
-            echo "| Target ECU | $TARGET_ECU |"
-            echo "| Test Cases | $TEST_CASES |"
-          } >> "$GITHUB_STEP_SUMMARY"
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "Jira Key   : $env:JIRA_KEY"
+          Write-Host "Bench ID   : $env:BENCH_ID"
+          Write-Host "Bench Name : $env:BENCH_NAME"
+          Write-Host "Target ECU : $env:TARGET_ECU"
+          Write-Host "Test Cases : $env:TEST_CASES"
+
+      # Find the target ECU project.
+      - name: Find ECU project
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $projectDir = Join-Path `
+            $env:GITHUB_WORKSPACE `
+            "system-hil\l2quality-gate\$env:TARGET_ECU"
+
+          Write-Host "Project directory: $projectDir"
+
+          if (-not (Test-Path $projectDir)) {
+            throw "Project directory not found: $projectDir"
+          }
+
+          $projects = @(
+            Get-ChildItem `
+              -Path $projectDir `
+              -Filter "*.prj" `
+              -File
+          )
+
+          Write-Host "Found $($projects.Count) .prj file(s)"
+
+          foreach ($project in $projects) {
+            Write-Host "PRJ: $($project.FullName)"
+          }
+
+          if ($projects.Count -eq 0) {
+            throw "No .prj file found under $projectDir"
+          }
+
+          if ($projects.Count -gt 1) {
+            throw "More than one .prj file found under $projectDir"
+          }
+
+          $projectPath = $projects[0].FullName
+
+          Write-Host "Selected project: $projectPath"
+
+          "PROJECT_PATH=$projectPath" |
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
+
+      # Find ecu.test_runner.exe.
+      - name: Find ECU-TEST Runner
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $searchRoots = @(
+            "C:\Program Files",
+            "C:\Program Files (x86)"
+          )
+
+          $runners = @()
+
+          foreach ($root in $searchRoots) {
+            if (Test-Path $root) {
+              $runners += Get-ChildItem `
+                -Path $root `
+                -Filter "ecu.test_runner.exe" `
+                -File `
+                -Recurse `
+                -ErrorAction SilentlyContinue
+            }
+          }
+
+          if ($runners.Count -eq 0) {
+            throw "ecu.test_runner.exe was not found."
+          }
+
+          $runner = $runners |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+
+          Write-Host "ECU-TEST Runner: $($runner.FullName)"
+
+          "ECUTEST_RUNNER=$($runner.FullName)" |
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
+
+      # Find the ECU-TEST workspace.
+      - name: Find ECU-TEST workspace
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $searchRoot = Join-Path `
+            $env:GITHUB_WORKSPACE `
+            "system-hil"
+
+          $workspaces = @(
+            Get-ChildItem `
+              -Path $searchRoot `
+              -Directory `
+              -Recurse `
+              -Force `
+              -ErrorAction SilentlyContinue |
+            Where-Object {
+              $_.Name -eq ".workspace"
+            }
+          )
+
+          if ($workspaces.Count -eq 0) {
+            throw "No ECU-TEST .workspace directory found under $searchRoot"
+          }
+
+          if ($workspaces.Count -gt 1) {
+            Write-Host "Multiple workspaces found:"
+
+            foreach ($workspace in $workspaces) {
+              Write-Host $workspace.Parent.FullName
+            }
+
+            throw "More than one ECU-TEST workspace found."
+          }
+
+          $workspacePath = $workspaces[0].Parent.FullName
+
+          Write-Host "Workspace: $workspacePath"
+
+          "ECUTEST_WORKSPACE=$workspacePath" |
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
+
+      # Create a clean ECU-TEST report directory.
+      - name: Create report directory
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $reportDir = Join-Path `
+            $env:GITHUB_WORKSPACE `
+            "ecu-test-results"
+
+          if (Test-Path $reportDir) {
+            Remove-Item `
+              -Path $reportDir `
+              -Recurse `
+              -Force
+          }
+
+          New-Item `
+            -Path $reportDir `
+            -ItemType Directory |
+            Out-Null
+
+          Write-Host "Report directory: $reportDir"
+
+          "REPORT_DIR=$reportDir" |
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
+
+      # Run the selected ECU-TEST project.
+      - name: Run ECU-TEST project
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "======================================"
+          Write-Host "ECU-TEST EXECUTION"
+          Write-Host "======================================"
+          Write-Host "Jira       : $env:JIRA_KEY"
+          Write-Host "Bench ID   : $env:BENCH_ID"
+          Write-Host "Bench Name : $env:BENCH_NAME"
+          Write-Host "Target ECU : $env:TARGET_ECU"
+          Write-Host "Test Cases : $env:TEST_CASES"
+          Write-Host "Workspace  : $env:ECUTEST_WORKSPACE"
+          Write-Host "Project    : $env:PROJECT_PATH"
+          Write-Host "Reports    : $env:REPORT_DIR"
+          Write-Host "Runner     : $env:ECUTEST_RUNNER"
+          Write-Host "======================================"
+
+          & "$env:ECUTEST_RUNNER" execute `
+            --workspace "$env:ECUTEST_WORKSPACE" `
+            --reportdirectory "$env:REPORT_DIR" `
+            "$env:PROJECT_PATH"
+
+          $exitCode = $LASTEXITCODE
+
+          Write-Host "ECU-TEST exit code: $exitCode"
+
+          if ($exitCode -ne 0) {
+            throw "ECU-TEST execution failed with exit code $exitCode"
+          }
+
+      # Display generated ECU-TEST results.
+      - name: Show ECU-TEST results
+        if: always()
+        shell: powershell
+        run: |
+          if (Test-Path $env:REPORT_DIR) {
+            Get-ChildItem `
+              -Path $env:REPORT_DIR `
+              -Recurse |
+              Select-Object FullName, Length
+          } else {
+            Write-Host "Report directory does not exist."
+          }
+
+      # Upload ECU-TEST reports.
+      - name: Upload ECU-TEST results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecu-test-${{ github.event.client_payload.target_ecu }}-${{ github.event.client_payload.jira_key }}
+          path: ecu-test-results
+          if-no-files-found: warn
+
+      # Write the execution summary.
+      - name: Summary
+        if: always()
+        shell: powershell
+        run: |
+          @"
+          ## Local ECU-TEST Execution
+
+          | Field | Value |
+          |---|---|
+          | Jira | $env:JIRA_KEY |
+          | Bench ID | $env:BENCH_ID |
+          | Bench Name | $env:BENCH_NAME |
+          | Target ECU | $env:TARGET_ECU |
+          | Test Cases | $env:TEST_CASES |
+          | Project | $env:PROJECT_PATH |
+          "@ | Out-File `
+            -FilePath $env:GITHUB_STEP_SUMMARY `
+            -Encoding utf8 `
+            -Append
