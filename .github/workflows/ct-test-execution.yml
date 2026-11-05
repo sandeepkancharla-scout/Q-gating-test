@@ -5,61 +5,17 @@ on:
     types:
       - ct_test_execution
 
+permissions:
+  contents: read
+
+env:
+  ONECX_URL: https://testguide-ssp.onecx.vwgroup.com
+  ONECX_PROJECT_ID: "10"
+  ONECX_PLAYBOOK_ID: "8632"
+
 jobs:
-  validate-request:
+  execute:
     runs-on: ubuntu-latest
-
-    steps:
-      # Validate the Jira payload.
-      - name: Validate Jira payload
-        shell: bash
-        env:
-          JIRA_KEY: ${{ github.event.client_payload.jira_key }}
-          BENCH_ID: ${{ github.event.client_payload.bench_id }}
-          BENCH_NAME: ${{ github.event.client_payload.bench_name }}
-          TARGET_ECU: ${{ github.event.client_payload.target_ecu }}
-          TEST_CASES: ${{ github.event.client_payload.test_cases }}
-        run: |
-          set -euo pipefail
-
-          echo "Jira Key   : $JIRA_KEY"
-          echo "Bench ID   : $BENCH_ID"
-          echo "Bench Name : $BENCH_NAME"
-          echo "Target ECU : $TARGET_ECU"
-          echo "Test Cases : $TEST_CASES"
-
-          [ -n "$JIRA_KEY" ] || { echo "ERROR: Jira Key missing"; exit 1; }
-          [ -n "$BENCH_ID" ] || { echo "ERROR: Bench ID missing"; exit 1; }
-          [ -n "$BENCH_NAME" ] || { echo "ERROR: Bench Name missing"; exit 1; }
-          [ -n "$TARGET_ECU" ] || { echo "ERROR: Target ECU missing"; exit 1; }
-          [ -n "$TEST_CASES" ] || { echo "ERROR: Test Cases missing"; exit 1; }
-
-          echo "Payload validation successful."
-
-      # Parse requested test cases.
-      - name: Parse test cases
-        shell: bash
-        env:
-          TEST_CASES: ${{ github.event.client_payload.test_cases }}
-        run: |
-          set -euo pipefail
-
-          IFS=',' read -ra TC_LIST <<< "$TEST_CASES"
-
-          echo "Requested Test Cases:"
-
-          for tc in "${TC_LIST[@]}"; do
-            tc="$(echo "$tc" | xargs)"
-            [ -n "$tc" ] && echo "- $tc"
-          done
-
-  run-ecu-test:
-    needs: validate-request
-
-    runs-on:
-      - self-hosted
-      - Windows
-      - X64
 
     env:
       JIRA_KEY: ${{ github.event.client_payload.jira_key }}
@@ -69,264 +25,244 @@ jobs:
       TEST_CASES: ${{ github.event.client_payload.test_cases }}
 
     steps:
-      # Checkout latest System HIL main.
-      - name: Checkout System HIL
+      # Validate Jira payload.
+      - name: Validate Jira payload
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Jira Key   : $JIRA_KEY"
+          echo "Bench ID   : $BENCH_ID"
+          echo "Bench Name : $BENCH_NAME"
+          echo "Target ECU : $TARGET_ECU"
+          echo "Test Cases : $TEST_CASES"
+
+          [ -n "$JIRA_KEY" ] || exit 1
+          [ -n "$BENCH_ID" ] || exit 1
+          [ -n "$BENCH_NAME" ] || exit 1
+          [ -n "$TARGET_ECU" ] || exit 1
+          [ -n "$TEST_CASES" ] || exit 1
+
+      # Checkout parent repository with all submodules.
+      - name: Checkout eeint-Test-Automation
         uses: actions/checkout@v4
         with:
-          repository: scout-motors/eeint-system-hil
+          repository: scout-motors/eeint-Test-Automation
           ref: main
-          fetch-depth: 1
+          fetch-depth: 0
+          submodules: recursive
           token: ${{ secrets.HIL_REPO_PAT }}
-          path: system-hil
+          path: eeint-Test-Automation
 
-      # Verify the incoming execution request.
-      - name: Show execution request
-        shell: powershell
+      # Record exact parent SHA.
+      - name: Get repository SHA
+        shell: bash
         run: |
-          $ErrorActionPreference = "Stop"
+          set -euo pipefail
 
-          Write-Host "Jira Key   : $env:JIRA_KEY"
-          Write-Host "Bench ID   : $env:BENCH_ID"
-          Write-Host "Bench Name : $env:BENCH_NAME"
-          Write-Host "Target ECU : $env:TARGET_ECU"
-          Write-Host "Test Cases : $env:TEST_CASES"
+          PARENT_SHA="$(git -C eeint-Test-Automation rev-parse HEAD)"
 
-      # Find the target ECU project.
-      - name: Find ECU project
-        shell: powershell
+          echo "PARENT_SHA=$PARENT_SHA" >> "$GITHUB_ENV"
+          echo "Parent SHA: $PARENT_SHA"
+
+          git -C eeint-Test-Automation submodule status --recursive
+
+      # Resolve CI_Disp project.
+      - name: Resolve ECU project
+        shell: bash
         run: |
-          $ErrorActionPreference = "Stop"
+          set -euo pipefail
 
-          $projectDir = Join-Path `
-            $env:GITHUB_WORKSPACE `
-            "system-hil\l2quality-gate\$env:TARGET_ECU"
+          PROJECT_DIR="eeint-Test-Automation/Packages/${BENCH_NAME}/L2_Quality_Gate/${TARGET_ECU}"
 
-          Write-Host "Project directory: $projectDir"
+          echo "Project directory: $PROJECT_DIR"
 
-          if (-not (Test-Path $projectDir)) {
-            throw "Project directory not found: $projectDir"
+          [ -d "$PROJECT_DIR" ] || {
+            echo "ERROR: Project directory not found."
+            exit 1
           }
 
-          $projects = @(
-            Get-ChildItem `
-              -Path $projectDir `
-              -Filter "*.prj" `
-              -File
+          mapfile -t PROJECTS < <(
+            find "$PROJECT_DIR" \
+              -maxdepth 1 \
+              -type f \
+              -iname "*.prj" \
+              -print
           )
 
-          Write-Host "Found $($projects.Count) .prj file(s)"
-
-          foreach ($project in $projects) {
-            Write-Host "PRJ: $($project.FullName)"
+          [ "${#PROJECTS[@]}" -gt 0 ] || {
+            echo "ERROR: No .prj found."
+            exit 1
           }
 
-          if ($projects.Count -eq 0) {
-            throw "No .prj file found under $projectDir"
+          [ "${#PROJECTS[@]}" -eq 1 ] || {
+            echo "ERROR: Multiple .prj files found."
+            printf '%s\n' "${PROJECTS[@]}"
+            exit 1
           }
 
-          if ($projects.Count -gt 1) {
-            throw "More than one .prj file found under $projectDir"
-          }
+          PROJECT_PATH="${PROJECTS[0]}"
+          RELATIVE_PROJECT_PATH="${PROJECT_PATH#eeint-Test-Automation/}"
 
-          $projectPath = $projects[0].FullName
+          echo "PROJECT_PATH=$PROJECT_PATH" >> "$GITHUB_ENV"
+          echo "RELATIVE_PROJECT_PATH=$RELATIVE_PROJECT_PATH" >> "$GITHUB_ENV"
 
-          Write-Host "Selected project: $projectPath"
+          echo "Project: $RELATIVE_PROJECT_PATH"
 
-          "PROJECT_PATH=$projectPath" |
-            Out-File `
-              -FilePath $env:GITHUB_ENV `
-              -Encoding utf8 `
-              -Append
-
-      # Find ecu.test_runner.exe.
-      - name: Find ECU-TEST Runner
-        shell: powershell
+      # Verify expected ONE.CX project.
+      - name: Verify Playbook project
+        shell: bash
         run: |
-          $ErrorActionPreference = "Stop"
+          set -euo pipefail
 
-          $searchRoots = @(
-            "C:\Program Files",
-            "C:\Program Files (x86)"
-          )
+          EXPECTED="Packages/system-hil/L2_Quality_Gate/CI_Disp/CI_Disp_L2QualityGate.prj"
 
-          $runners = @()
+          ACTUAL="$(printf '%s' "$RELATIVE_PROJECT_PATH" | tr '\\' '/')"
 
-          foreach ($root in $searchRoots) {
-            if (Test-Path $root) {
-              $runners += Get-ChildItem `
-                -Path $root `
-                -Filter "ecu.test_runner.exe" `
-                -File `
-                -Recurse `
-                -ErrorAction SilentlyContinue
+          echo "Expected: $EXPECTED"
+          echo "Actual  : $ACTUAL"
+
+          [ "$ACTUAL" = "$EXPECTED" ] || {
+            echo "ERROR: Playbook project and repository project do not match."
+            exit 1
+          }
+
+      # Build ONE.CX execution request.
+      - name: Build ONE.CX request
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          jq -n \
+            --arg name "${JIRA_KEY} - ${TARGET_ECU} L2 Quality Gate" \
+            --arg jira "https://scoutmotors.atlassian.net/browse/${JIRA_KEY}" \
+            '{
+              name: $name,
+              priority: 42,
+              parameters: [],
+              additionalSettings: {
+                analysisExecutionMode: "sequential",
+                downstreamAnalysisPartitioning: "analysis",
+                expirationTimeInMinutes: 60,
+                issueTrackerTickets: [$jira],
+                remainingRetriesOnError: 0
+              }
+            }' > onecx-request.json
+
+          cat onecx-request.json
+
+      # Execute existing ONE.CX Playbook.
+      - name: Execute ONE.CX Playbook
+        id: execute
+        shell: bash
+        env:
+          ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+        run: |
+          set -euo pipefail
+
+          HTTP_CODE="$(
+            curl \
+              --silent \
+              --show-error \
+              --output onecx-response.json \
+              --write-out "%{http_code}" \
+              --request POST \
+              --header "accept: */*" \
+              --header "Content-Type: application/json" \
+              --header "TestGuide-AuthKey: $ONECX_AUTH_KEY" \
+              --data @onecx-request.json \
+              "${ONECX_URL}/api/v2/execution/playbook/${ONECX_PLAYBOOK_ID}/execute?projectId=${ONECX_PROJECT_ID}&checkLastExecution=false"
+          )"
+
+          echo "HTTP: $HTTP_CODE"
+          cat onecx-response.json
+
+          [ "$HTTP_CODE" = "200" ] || {
+            echo "ERROR: ONE.CX execution request failed."
+            exit 1
+          }
+
+          TASK_ID="$(jq -r '.taskIds[0] // empty' onecx-response.json)"
+
+          [ -n "$TASK_ID" ] || {
+            echo "ERROR: ONE.CX returned no taskId."
+            exit 1
+          }
+
+          echo "TASK_ID=$TASK_ID" >> "$GITHUB_ENV"
+          echo "task_id=$TASK_ID" >> "$GITHUB_OUTPUT"
+
+          echo "ONE.CX Task ID: $TASK_ID"
+
+      # Poll ONE.CX task.
+      - name: Wait for ONE.CX task
+        shell: bash
+        env:
+          ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+        run: |
+          set -euo pipefail
+
+          for attempt in $(seq 1 60); do
+
+            HTTP_CODE="$(
+              curl \
+                --silent \
+                --show-error \
+                --output task.json \
+                --write-out "%{http_code}" \
+                --header "accept: application/json" \
+                --header "TestGuide-AuthKey: $ONECX_AUTH_KEY" \
+                "${ONECX_URL}/api/v2/execution/task/${TASK_ID}?projectId=${ONECX_PROJECT_ID}"
+            )"
+
+            [ "$HTTP_CODE" = "200" ] || {
+              echo "ERROR: Unable to retrieve ONE.CX task."
+              cat task.json
+              exit 1
             }
-          }
 
-          if ($runners.Count -eq 0) {
-            throw "ecu.test_runner.exe was not found."
-          }
+            STATE="$(jq -r '.state // "UNKNOWN"' task.json)"
 
-          $runner = $runners |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1
+            echo "Attempt $attempt: $STATE"
 
-          Write-Host "ECU-TEST Runner: $($runner.FullName)"
+            case "$STATE" in
+              FINISHED|COMPLETED|SUCCESS|SUCCEEDED)
+                echo "ONE.CX execution completed."
+                exit 0
+                ;;
 
-          "ECUTEST_RUNNER=$($runner.FullName)" |
-            Out-File `
-              -FilePath $env:GITHUB_ENV `
-              -Encoding utf8 `
-              -Append
+              ERROR|FAILED|ABORTED|CANCELLED|CANCELED)
+                echo "ONE.CX execution failed."
+                jq '.stateInfo // {}' task.json
+                exit 1
+                ;;
 
-      # Find the ECU-TEST workspace.
-      - name: Find ECU-TEST workspace
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
+              *)
+                sleep 10
+                ;;
+            esac
 
-          $searchRoot = Join-Path `
-            $env:GITHUB_WORKSPACE `
-            "system-hil"
+          done
 
-          $workspaces = @(
-            Get-ChildItem `
-              -Path $searchRoot `
-              -Directory `
-              -Recurse `
-              -Force `
-              -ErrorAction SilentlyContinue |
-            Where-Object {
-              $_.Name -eq ".workspace"
-            }
-          )
+          echo "ERROR: ONE.CX execution timeout."
+          exit 1
 
-          if ($workspaces.Count -eq 0) {
-            throw "No ECU-TEST .workspace directory found under $searchRoot"
-          }
-
-          if ($workspaces.Count -gt 1) {
-            Write-Host "Multiple workspaces found:"
-
-            foreach ($workspace in $workspaces) {
-              Write-Host $workspace.Parent.FullName
-            }
-
-            throw "More than one ECU-TEST workspace found."
-          }
-
-          $workspacePath = $workspaces[0].Parent.FullName
-
-          Write-Host "Workspace: $workspacePath"
-
-          "ECUTEST_WORKSPACE=$workspacePath" |
-            Out-File `
-              -FilePath $env:GITHUB_ENV `
-              -Encoding utf8 `
-              -Append
-
-      # Create a clean ECU-TEST report directory.
-      - name: Create report directory
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $reportDir = Join-Path `
-            $env:GITHUB_WORKSPACE `
-            "ecu-test-results"
-
-          if (Test-Path $reportDir) {
-            Remove-Item `
-              -Path $reportDir `
-              -Recurse `
-              -Force
-          }
-
-          New-Item `
-            -Path $reportDir `
-            -ItemType Directory |
-            Out-Null
-
-          Write-Host "Report directory: $reportDir"
-
-          "REPORT_DIR=$reportDir" |
-            Out-File `
-              -FilePath $env:GITHUB_ENV `
-              -Encoding utf8 `
-              -Append
-
-      # Run the selected ECU-TEST project.
-      - name: Run ECU-TEST project
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          Write-Host "======================================"
-          Write-Host "ECU-TEST EXECUTION"
-          Write-Host "======================================"
-          Write-Host "Jira       : $env:JIRA_KEY"
-          Write-Host "Bench ID   : $env:BENCH_ID"
-          Write-Host "Bench Name : $env:BENCH_NAME"
-          Write-Host "Target ECU : $env:TARGET_ECU"
-          Write-Host "Test Cases : $env:TEST_CASES"
-          Write-Host "Workspace  : $env:ECUTEST_WORKSPACE"
-          Write-Host "Project    : $env:PROJECT_PATH"
-          Write-Host "Reports    : $env:REPORT_DIR"
-          Write-Host "Runner     : $env:ECUTEST_RUNNER"
-          Write-Host "======================================"
-
-          & "$env:ECUTEST_RUNNER" execute `
-            --workspace "$env:ECUTEST_WORKSPACE" `
-            --reportdirectory "$env:REPORT_DIR" `
-            "$env:PROJECT_PATH"
-
-          $exitCode = $LASTEXITCODE
-
-          Write-Host "ECU-TEST exit code: $exitCode"
-
-          if ($exitCode -ne 0) {
-            throw "ECU-TEST execution failed with exit code $exitCode"
-          }
-
-      # Display generated ECU-TEST results.
-      - name: Show ECU-TEST results
-        if: always()
-        shell: powershell
-        run: |
-          if (Test-Path $env:REPORT_DIR) {
-            Get-ChildItem `
-              -Path $env:REPORT_DIR `
-              -Recurse |
-              Select-Object FullName, Length
-          } else {
-            Write-Host "Report directory does not exist."
-          }
-
-      # Upload ECU-TEST reports.
-      - name: Upload ECU-TEST results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ecu-test-${{ github.event.client_payload.target_ecu }}-${{ github.event.client_payload.jira_key }}
-          path: ecu-test-results
-          if-no-files-found: warn
-
-      # Write the execution summary.
+      # Write execution summary.
       - name: Summary
         if: always()
-        shell: powershell
+        shell: bash
         run: |
-          @"
-          ## Local ECU-TEST Execution
-
-          | Field | Value |
-          |---|---|
-          | Jira | $env:JIRA_KEY |
-          | Bench ID | $env:BENCH_ID |
-          | Bench Name | $env:BENCH_NAME |
-          | Target ECU | $env:TARGET_ECU |
-          | Test Cases | $env:TEST_CASES |
-          | Project | $env:PROJECT_PATH |
-          "@ | Out-File `
-            -FilePath $env:GITHUB_STEP_SUMMARY `
-            -Encoding utf8 `
-            -Append
+          {
+            echo "## CT Execution"
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Jira | \`${JIRA_KEY}\` |"
+            echo "| Bench ID | \`${BENCH_ID}\` |"
+            echo "| Bench Name | \`${BENCH_NAME}\` |"
+            echo "| Target ECU | \`${TARGET_ECU}\` |"
+            echo "| Test Cases | \`${TEST_CASES}\` |"
+            echo "| Parent SHA | \`${PARENT_SHA:-Unavailable}\` |"
+            echo "| Project | \`${RELATIVE_PROJECT_PATH:-Unavailable}\` |"
+            echo "| Playbook | \`${ONECX_PLAYBOOK_ID}\` |"
+            echo "| ONE.CX Task | \`${TASK_ID:-Unavailable}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
