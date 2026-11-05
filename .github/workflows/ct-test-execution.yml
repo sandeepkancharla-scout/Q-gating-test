@@ -42,31 +42,31 @@ jobs:
           Write-Host "ONE.CX Project  : $env:ONECX_PROJECT_ID"
           Write-Host "ONE.CX Playbook : $env:ONECX_PLAYBOOK_NAME"
 
-          if (-not $env:JIRA_KEY) {
+          if ([string]::IsNullOrWhiteSpace($env:JIRA_KEY)) {
             throw "Jira Key missing"
           }
 
-          if (-not $env:BENCH_ID) {
+          if ([string]::IsNullOrWhiteSpace($env:BENCH_ID)) {
             throw "Bench ID missing"
           }
 
-          if (-not $env:BENCH_NAME) {
+          if ([string]::IsNullOrWhiteSpace($env:BENCH_NAME)) {
             throw "Bench Name missing"
           }
 
-          if (-not $env:TARGET_ECU) {
+          if ([string]::IsNullOrWhiteSpace($env:TARGET_ECU)) {
             throw "Target ECU missing"
           }
 
-          if (-not $env:TEST_CASES) {
+          if ([string]::IsNullOrWhiteSpace($env:TEST_CASES)) {
             throw "Test Cases missing"
           }
 
-          if (-not $env:ONECX_PROJECT_ID) {
+          if ([string]::IsNullOrWhiteSpace($env:ONECX_PROJECT_ID)) {
             throw "GitHub variable ONECX_PROJECT_ID is missing"
           }
 
-          if (-not $env:ONECX_PLAYBOOK_NAME) {
+          if ([string]::IsNullOrWhiteSpace($env:ONECX_PLAYBOOK_NAME)) {
             throw "ONECX_PLAYBOOK_NAME is missing"
           }
 
@@ -79,12 +79,12 @@ jobs:
           git --version
 
           if ($LASTEXITCODE -ne 0) {
-            throw "Git is not available on PATH"
+            throw "Git is not available on the runner PATH"
           }
 
           where.exe git
 
-      # Checkout parent and all submodules.
+      # Checkout parent and all HIL submodules.
       - name: Checkout eeint-Test-Automation
         uses: actions/checkout@v4
         with:
@@ -102,7 +102,6 @@ jobs:
           $ErrorActionPreference = "Stop"
 
           $repoPath = Join-Path $env:GITHUB_WORKSPACE "eeint-Test-Automation"
-
           $parentSha = git -C "$repoPath" rev-parse HEAD
 
           if ($LASTEXITCODE -ne 0) {
@@ -148,7 +147,7 @@ jobs:
               -File
           )
 
-          Write-Host "Found $($projects.Count) project(s)"
+          Write-Host "Found $($projects.Count) project file(s)"
 
           foreach ($project in $projects) {
             Write-Host "PRJ: $($project.FullName)"
@@ -163,10 +162,7 @@ jobs:
           }
 
           $absolutePath = $projects[0].FullName
-
-          $relativePath = $absolutePath.Substring(
-            $repoPath.Length + 1
-          )
+          $relativePath = $absolutePath.Substring($repoPath.Length + 1)
 
           Write-Host "Resolved project: $relativePath"
 
@@ -174,7 +170,7 @@ jobs:
             -Path $env:GITHUB_ENV `
             -Value "PROJECT_PATH=$relativePath"
 
-      # Resolve latest ONE.CX Playbook.
+      # Resolve latest ONE.CX Playbook revision.
       - name: Resolve latest ONE.CX Playbook
         shell: powershell
         env:
@@ -182,11 +178,16 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          if (-not $env:ONECX_AUTH_KEY) {
+          if ([string]::IsNullOrWhiteSpace($env:ONECX_AUTH_KEY)) {
             throw "ONECX_AUTH_KEY secret is missing"
           }
 
-          $uri = "$env:ONECX_URL/api/v2/execution/playbook?projectId=$env:ONECX_PROJECT_ID&playbookName=$env:ONECX_PLAYBOOK_NAME&sort=NAME&ascending=ASC&offset=0&limit=100"
+          $encodedName = [Uri]::EscapeDataString($env:ONECX_PLAYBOOK_NAME)
+
+          $uri = "{0}/api/v2/execution/playbook?projectId={1}&playbookName={2}&sort=NAME&ascending=ASC&offset=0&limit=100" -f `
+            $env:ONECX_URL, `
+            $env:ONECX_PROJECT_ID, `
+            $encodedName
 
           $headers = @{
             "TestGuide-AuthKey" = $env:ONECX_AUTH_KEY
@@ -224,27 +225,21 @@ jobs:
               -Descending |
             Select-Object -First 1
 
-          if (-not $latestPlaybook) {
+          if ($null -eq $latestPlaybook) {
             throw "Unable to select latest Playbook"
           }
 
-          $playbookId = "$($latestPlaybook.playbookId)"
-          $playbookRevision = "$($latestPlaybook.revision)"
-          $playbookProjectId = "$($latestPlaybook.projectId)"
-
-          $playbookId = $playbookId.Trim()
-          $playbookRevision = $playbookRevision.Trim()
-          $playbookProjectId = $playbookProjectId.Trim()
-
-          $configuredProjectId = "$env:ONECX_PROJECT_ID"
-          $configuredProjectId = $configuredProjectId.Trim()
+          $playbookId = "$($latestPlaybook.playbookId)".Trim()
+          $playbookRevision = "$($latestPlaybook.revision)".Trim()
+          $playbookProjectId = "$($latestPlaybook.projectId)".Trim()
+          $configuredProjectId = "$env:ONECX_PROJECT_ID".Trim()
 
           Write-Host "Selected Playbook ID      : $playbookId"
           Write-Host "Selected Playbook Revision: $playbookRevision"
           Write-Host "Selected Playbook Project : $playbookProjectId"
 
           if ($playbookProjectId -ne $configuredProjectId) {
-            throw "Playbook project ID does not match configured ONE.CX project ID"
+            throw "Playbook project ID does not match configured project ID"
           }
 
           Add-Content `
@@ -261,17 +256,16 @@ jobs:
               -Path "$env:GITHUB_WORKSPACE\resolved-playbook.json" `
               -Encoding UTF8
 
-      # Verify Playbook .prj path.
+      # Verify repository .prj matches the Playbook.
       - name: Verify Playbook project path
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          $playbookJson = Get-Content `
+          $playbook = Get-Content `
             -Path "$env:GITHUB_WORKSPACE\resolved-playbook.json" `
-            -Raw
-
-          $playbook = $playbookJson | ConvertFrom-Json
+            -Raw |
+            ConvertFrom-Json
 
           $projectSteps = @(
             $playbook.execution.testcases |
@@ -324,7 +318,8 @@ jobs:
             }
           }
 
-          $json = $request | ConvertTo-Json -Depth 10
+          $json = $request |
+            ConvertTo-Json -Depth 10
 
           Set-Content `
             -Path "$env:GITHUB_WORKSPACE\onecx-request.json" `
@@ -333,7 +328,7 @@ jobs:
 
           Write-Host $json
 
-      # Execute latest Playbook.
+      # Execute latest ONE.CX Playbook.
       - name: Execute ONE.CX Playbook
         shell: powershell
         env:
@@ -341,15 +336,18 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          if (-not $env:ONECX_PLAYBOOK_ID) {
+          if ([string]::IsNullOrWhiteSpace($env:ONECX_PLAYBOOK_ID)) {
             throw "ONECX_PLAYBOOK_ID was not resolved"
           }
 
-          if (-not $env:ONECX_AUTH_KEY) {
+          if ([string]::IsNullOrWhiteSpace($env:ONECX_AUTH_KEY)) {
             throw "ONECX_AUTH_KEY secret is missing"
           }
 
-          $uri = "$env:ONECX_URL/api/v2/execution/playbook/$env:ONECX_PLAYBOOK_ID/execute?projectId=$env:ONECX_PROJECT_ID&checkLastExecution=false"
+          $uri = "{0}/api/v2/execution/playbook/{1}/execute?projectId={2}&checkLastExecution=false" -f `
+            $env:ONECX_URL, `
+            $env:ONECX_PLAYBOOK_ID, `
+            $env:ONECX_PROJECT_ID
 
           $headers = @{
             "TestGuide-AuthKey" = $env:ONECX_AUTH_KEY
@@ -384,7 +382,11 @@ jobs:
             throw "ONE.CX returned no taskId"
           }
 
-          $taskId = "$($taskIds[0])"
+          $taskId = "$($taskIds[0])".Trim()
+
+          if ([string]::IsNullOrWhiteSpace($taskId)) {
+            throw "ONE.CX returned an empty taskId"
+          }
 
           Write-Host "ONE.CX Task ID: $taskId"
 
@@ -392,7 +394,7 @@ jobs:
             -Path $env:GITHUB_ENV `
             -Value "TASK_ID=$taskId"
 
-      # Poll ONE.CX execution task.
+      # Poll ONE.CX task.
       - name: Wait for ONE.CX task
         shell: powershell
         env:
@@ -400,8 +402,12 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          if (-not $env:TASK_ID) {
+          if ([string]::IsNullOrWhiteSpace($env:TASK_ID)) {
             throw "TASK_ID is missing"
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:ONECX_AUTH_KEY)) {
+            throw "ONECX_AUTH_KEY is missing"
           }
 
           $headers = @{
@@ -409,11 +415,14 @@ jobs:
             "Accept" = "application/json"
           }
 
-          $uri = "$env:ONECX_URL/api/v2/execution/task/$env:TASK_ID"
-          $uri = "$uri?projectId=$env:ONECX_PROJECT_ID"
+          $uri = "{0}/api/v2/execution/task/{1}?projectId={2}" -f `
+            $env:ONECX_URL, `
+            $env:TASK_ID, `
+            $env:ONECX_PROJECT_ID
 
-          Write-Host "Task ID : $env:TASK_ID"
-          Write-Host "Task URL: $uri"
+          Write-Host "Task ID  : $env:TASK_ID"
+          Write-Host "Project  : $env:ONECX_PROJECT_ID"
+          Write-Host "Task URL : $uri"
 
           for ($attempt = 1; $attempt -le 60; $attempt++) {
 
@@ -422,8 +431,7 @@ jobs:
               -Uri $uri `
               -Headers $headers
 
-            $state = "$($task.state)"
-            $state = $state.ToUpper()
+            $state = "$($task.state)".ToUpper()
 
             Write-Host "Attempt ${attempt}: $state"
 
@@ -433,14 +441,7 @@ jobs:
               "SUCCESS",
               "SUCCEEDED"
             )) {
-              Write-Host "ONE.CX execution completed"
-              exit 0
-            }
-
-            if ($state -in @(
-              "ERROR",
-              "FAILED",
-              "ABORTED",
+              Write-Host "ONE.CX execution completed      "ABORTED",
               "CANCELLED",
               "CANCELED"
             )) {
@@ -464,7 +465,7 @@ jobs:
 
           throw "ONE.CX execution timed out after 10 minutes"
 
-      # Publish execution summary.
+      # Write execution summary.
       - name: Summary
         if: always()
         shell: powershell
