@@ -15,7 +15,11 @@ env:
 
 jobs:
   execute:
-    runs-on: ubuntu-latest
+    runs-on: 
+      -self-hosted
+      -Windows
+      -X64
+      -qgate
 
     env:
       JIRA_KEY: ${{ github.event.client_payload.jira_key }}
