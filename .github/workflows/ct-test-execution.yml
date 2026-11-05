@@ -60,7 +60,21 @@ jobs:
             throw "Test Cases missing"
           }
 
-      # Checkout latest parent repository and all HIL submodules.
+      # Verify Git is available on the runner.
+      - name: Verify Git
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          git --version
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Git is not available on the runner PATH"
+          }
+
+          where.exe git
+
+      # Checkout parent repository and all HIL submodules.
       - name: Checkout eeint-Test-Automation
         uses: actions/checkout@v4
         with:
@@ -71,18 +85,20 @@ jobs:
           token: ${{ secrets.HIL_REPO_PAT }}
           path: eeint-Test-Automation
 
-      # Capture the exact parent repository SHA.
+      # Capture exact repository revision.
       - name: Get repository SHA
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          $repoPath = Join-Path $env:GITHUB_WORKSPACE "eeint-Test-Automation"
+          $repoPath = Join-Path `
+            $env:GITHUB_WORKSPACE `
+            "eeint-Test-Automation"
 
-          $parentSha = git -C $repoPath rev-parse HEAD
+          $parentSha = git -C "$repoPath" rev-parse HEAD
 
           if ($LASTEXITCODE -ne 0) {
-            throw "Unable to determine eeint-Test-Automation SHA"
+            throw "Unable to determine parent repository SHA"
           }
 
           $parentSha = $parentSha.Trim()
@@ -95,9 +111,9 @@ jobs:
               -Encoding utf8 `
               -Append
 
-          git -C $repoPath submodule status --recursive
+          git -C "$repoPath" submodule status --recursive
 
-      # Locate the ECU project from the Jira payload.
+      # Resolve ECU project.
       - name: Resolve ECU project
         shell: powershell
         run: |
@@ -113,18 +129,18 @@ jobs:
 
           Write-Host "Project directory: $projectDir"
 
-          if (-not (Test-Path $projectDir)) {
+          if (-not (Test-Path "$projectDir")) {
             throw "Project directory not found: $projectDir"
           }
 
           $projects = @(
             Get-ChildItem `
-              -Path $projectDir `
+              -Path "$projectDir" `
               -Filter "*.prj" `
               -File
           )
 
-          Write-Host "Found $($projects.Count) project(s)"
+          Write-Host "Found $($projects.Count) .prj file(s)"
 
           foreach ($project in $projects) {
             Write-Host "PRJ: $($project.FullName)"
@@ -135,11 +151,10 @@ jobs:
           }
 
           if ($projects.Count -gt 1) {
-            throw "More than one .prj file found"
+            throw "Expected exactly one .prj file"
           }
 
           $projectPath = $projects[0].FullName
-
           $relativePath = $projectPath.Substring(
             $repoPath.Length + 1
           )
@@ -152,7 +167,7 @@ jobs:
               -Encoding utf8 `
               -Append
 
-      # Verify the Git project matches Playbook 8632.
+      # Verify repository and Playbook project match.
       - name: Verify Playbook project
         shell: powershell
         run: |
@@ -160,20 +175,20 @@ jobs:
 
           $expected = "Packages\system-hil\L2_Quality_Gate\CI_Disp\CI_Disp_L2QualityGate.prj"
 
-          Write-Host "Repository project : $env:PROJECT_PATH"
-          Write-Host "Playbook project   : $expected"
+          Write-Host "Repository project: $env:PROJECT_PATH"
+          Write-Host "Playbook project  : $expected"
 
           if ($env:PROJECT_PATH -ne $expected) {
-            throw "Repository project does not match ONE.CX Playbook 8632"
+            throw "Repository project does not match Playbook 8632"
           }
 
-      # Build the ONE.CX request.
+      # Build ONE.CX request.
       - name: Build ONE.CX request
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          $body = @{
+          $request = @{
             name = "$env:JIRA_KEY - $env:TARGET_ECU L2 Quality Gate"
             priority = 42
             parameters = @()
@@ -188,15 +203,16 @@ jobs:
             }
           }
 
-          $body |
-            ConvertTo-Json -Depth 10 |
+          $json = $request | ConvertTo-Json -Depth 10
+
+          $json |
             Set-Content `
-              -Path "onecx-request.json" `
+              -Path "$env:GITHUB_WORKSPACE\onecx-request.json" `
               -Encoding utf8
 
-          Get-Content "onecx-request.json"
+          Write-Host $json
 
-      # Start the existing ONE.CX Playbook.
+      # Execute existing ONE.CX Playbook.
       - name: Execute ONE.CX Playbook
         shell: powershell
         env:
@@ -208,18 +224,19 @@ jobs:
             throw "ONECX_AUTH_KEY secret is missing"
           }
 
-          $uri = "$env:ONECX_URL/api/v2/execution/playbook/$env:ONECX_PLAYBOOK_ID/execute?projectId=$env:ONECX_PROJECT_ID&checkLastExecution=false"
+          $uri = "${env:ONECX_URL}/api/v2/execution/playbook/${env:ONECX_PLAYBOOK_ID}/execute?projectId=${env:ONECX_PROJECT_ID}&checkLastExecution=false"
+
+          Write-Host "ONE.CX Project : $env:ONECX_PROJECT_ID"
+          Write-Host "ONE.CX Playbook: $env:ONECX_PLAYBOOK_ID"
+          Write-Host "ONE.CX URL     : $uri"
 
           $headers = @{
             "TestGuide-AuthKey" = $env:ONECX_AUTH_KEY
             "Accept" = "*/*"
           }
 
-          Write-Host "ONE.CX Project  : $env:ONECX_PROJECT_ID"
-          Write-Host "ONE.CX Playbook : $env:ONECX_PLAYBOOK_ID"
-
           $body = Get-Content `
-            -Path "onecx-request.json" `
+            -Path "$env:GITHUB_WORKSPACE\onecx-request.json" `
             -Raw
 
           $response = Invoke-RestMethod `
@@ -229,7 +246,11 @@ jobs:
             -ContentType "application/json" `
             -Body $body
 
-          $taskId = $response.taskIds[0]
+          Write-Host "ONE.CX response:"
+          $response | ConvertTo-Json -Depth 10
+
+          $taskId = $response.taskIds |
+            Select-Object -First 1
 
           if (-not $taskId) {
             throw "ONE.CX returned no taskId"
@@ -243,7 +264,7 @@ jobs:
               -Encoding utf8 `
               -Append
 
-      # Poll the ONE.CX task until completion.
+      # Poll ONE.CX task status.
       - name: Wait for ONE.CX task
         shell: powershell
         env:
@@ -251,12 +272,19 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
+          if ([string]::IsNullOrWhiteSpace($env:TASK_ID)) {
+            throw "TASK_ID is missing"
+          }
+
           $headers = @{
             "TestGuide-AuthKey" = $env:ONECX_AUTH_KEY
             "Accept" = "application/json"
           }
 
-          $uri = "$env:ONECX_URL/api/v2/execution/task/$env:TASK_ID?projectId=$env:ONECX_PROJECT_ID"
+          $uri = "${env:ONECX_URL}/api/v2/execution/task/${env:TASK_ID}?projectId=${env:ONECX_PROJECT_ID}"
+
+          Write-Host "Task ID : $env:TASK_ID"
+          Write-Host "Task URL: $uri"
 
           for ($attempt = 1; $attempt -le 60; $attempt++) {
 
@@ -292,19 +320,37 @@ jobs:
                 Write-Host "Error: $($task.stateInfo.errorMessage)"
               }
 
+              Write-Host "Task response:"
+              $task | ConvertTo-Json -Depth 20
+
               exit 1
             }
 
             Start-Sleep -Seconds 10
           }
 
-          throw "ONE.CX execution timed out"
+          throw "ONE.CX execution timed out after 10 minutes"
 
-      # Publish execution details.
-      - name: Summary
-        if: always()
-        shell: powershell
+      # Publish workflow ll: powershell
         run: |
+          $parentSha = if ($env:PARENT_SHA) {
+            $env:PARENT_SHA
+          } else {
+            "Unavailable"
+          }
+
+          $projectPath = if ($env:PROJECT_PATH) {
+            $env:PROJECT_PATH
+          } else {
+            "Unavailable"
+          }
+
+          $taskId = if ($env:TASK_ID) {
+            $env:TASK_ID
+          } else {
+            "Unavailable"
+          }
+
           @"
           ## CT Execution
 
@@ -315,12 +361,13 @@ jobs:
           | Bench Name | $env:BENCH_NAME |
           | Target ECU | $env:TARGET_ECU |
           | Test Cases | $env:TEST_CASES |
-          | Parent SHA | $env:PARENT_SHA |
-          | Project | $env:PROJECT_PATH |
+          | Parent SHA | $parentSha |
+          | Project | $projectPath |
           | ONE.CX Project | $env:ONECX_PROJECT_ID |
           | ONE.CX Playbook | $env:ONECX_PLAYBOOK_ID |
-          | ONE.CX Task | $env:TASK_ID |
+          | ONE.CX Task | $taskId |
           "@ |
             Out-File `
-           -Encoding utf8 `
+              -FilePath $env:GITHUB_STEP_SUMMARY `
+              -Encoding utf8 `
               -Append
