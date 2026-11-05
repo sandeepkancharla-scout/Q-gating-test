@@ -16,9 +16,9 @@ env:
 jobs:
   execute:
     runs-on: 
-      -self-hosted
-      -Windows
-      -X64
+      - self-hosted
+      - Windows
+      - X64
       
 
     env:
