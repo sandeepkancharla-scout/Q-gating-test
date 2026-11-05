@@ -19,7 +19,7 @@ jobs:
       -self-hosted
       -Windows
       -X64
-      -qgate
+      
 
     env:
       JIRA_KEY: ${{ github.event.client_payload.jira_key }}
