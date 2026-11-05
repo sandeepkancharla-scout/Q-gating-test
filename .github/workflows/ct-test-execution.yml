@@ -10,8 +10,8 @@ permissions:
 
 env:
   ONECX_URL: https://testguide-ssp.onecx.vwgroup.com
-  ONECX_PROJECT_ID: "10"
-  ONECX_PLAYBOOK_ID: "8632"
+  ONECX_PROJECT_ID: ${{ vars.ONECX_PROJECT_ID }}
+  ONECX_PLAYBOOK_NAME: SandeepTestNewPlaybook
 
 jobs:
   execute:
@@ -28,17 +28,19 @@ jobs:
       TEST_CASES: ${{ github.event.client_payload.test_cases }}
 
     steps:
-      # Validate Jira payload.
-      - name: Validate Jira payload
+      # Validate Jira and ONE.CX configuration.
+      - name: Validate inputs
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          Write-Host "Jira Key   : $env:JIRA_KEY"
-          Write-Host "Bench ID   : $env:BENCH_ID"
-          Write-Host "Bench Name : $env:BENCH_NAME"
-          Write-Host "Target ECU : $env:TARGET_ECU"
-          Write-Host "Test Cases : $env:TEST_CASES"
+          Write-Host "Jira Key         : $env:JIRA_KEY"
+          Write-Host "Bench ID         : $env:BENCH_ID"
+          Write-Host "Bench Name       : $env:BENCH_NAME"
+          Write-Host "Target ECU       : $env:TARGET_ECU"
+          Write-Host "Test Cases       : $env:TEST_CASES"
+          Write-Host "ONE.CX Project   : $env:ONECX_PROJECT_ID"
+          Write-Host "ONE.CX Playbook  : $env:ONECX_PLAYBOOK_NAME"
 
           if ([string]::IsNullOrWhiteSpace($env:JIRA_KEY)) {
             throw "Jira Key missing"
@@ -60,7 +62,15 @@ jobs:
             throw "Test Cases missing"
           }
 
-      # Verify Git is available on the runner.
+          if ([string]::IsNullOrWhiteSpace($env:ONECX_PROJECT_ID)) {
+            throw "GitHub variable ONECX_PROJECT_ID is missing"
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:ONECX_PLAYBOOK_NAME)) {
+            throw "ONECX_PLAYBOOK_NAME is missing"
+          }
+
+      # Verify Git availability.
       - name: Verify Git
         shell: powershell
         run: |
@@ -74,7 +84,7 @@ jobs:
 
           where.exe git
 
-      # Checkout parent repository and all HIL submodules.
+      # Checkout latest parent and all submodules.
       - name: Checkout eeint-Test-Automation
         uses: actions/checkout@v4
         with:
@@ -113,7 +123,7 @@ jobs:
 
           git -C "$repoPath" submodule status --recursive
 
-      # Resolve ECU project.
+      # Resolve the ECU project.
       - name: Resolve ECU project
         shell: powershell
         run: |
@@ -140,22 +150,22 @@ jobs:
               -File
           )
 
-          Write-Host "Found $($projects.Count) .prj file(s)"
+          Write-Host "Found $($projects.Count) project file(s)"
 
           foreach ($project in $projects) {
             Write-Host "PRJ: $($project.FullName)"
           }
 
           if ($projects.Count -eq 0) {
-            throw "No .prj file found"
+            throw "No .prj file found under $projectDir"
           }
 
           if ($projects.Count -gt 1) {
-            throw "Expected exactly one .prj file"
+            throw "Expected exactly one .prj file under $projectDir"
           }
 
-          $projectPath = $projects[0].FullName
-          $relativePath = $projectPath.Substring(
+          $absolutePath = $projects[0].FullName
+          $relativePath = $absolutePath.Substring(
             $repoPath.Length + 1
           )
 
@@ -167,53 +177,8 @@ jobs:
               -Encoding utf8 `
               -Append
 
-      # Verify repository and Playbook project match.
-      - name: Verify Playbook project
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $expected = "Packages\system-hil\L2_Quality_Gate\CI_Disp\CI_Disp_L2QualityGate.prj"
-
-          Write-Host "Repository project: $env:PROJECT_PATH"
-          Write-Host "Playbook project  : $expected"
-
-          if ($env:PROJECT_PATH -ne $expected) {
-            throw "Repository project does not match Playbook 8632"
-          }
-
-      # Build ONE.CX request.
-      - name: Build ONE.CX request
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $request = @{
-            name = "$env:JIRA_KEY - $env:TARGET_ECU L2 Quality Gate"
-            priority = 42
-            parameters = @()
-            additionalSettings = @{
-              analysisExecutionMode = "sequential"
-              downstreamAnalysisPartitioning = "analysis"
-              expirationTimeInMinutes = 60
-              issueTrackerTickets = @(
-                "https://scoutmotors.atlassian.net/browse/$env:JIRA_KEY"
-              )
-              remainingRetriesOnError = 0
-            }
-          }
-
-          $json = $request | ConvertTo-Json -Depth 10
-
-          $json |
-            Set-Content `
-              -Path "$env:GITHUB_WORKSPACE\onecx-request.json" `
-              -Encoding utf8
-
-          Write-Host $json
-
-      # Execute existing ONE.CX Playbook.
-      - name: Execute ONE.CX Playbook
+      # Find latest ONE.CX Playbook revision.
+      - name: Resolve latest ONE.CX Playbook
         shell: powershell
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
@@ -224,16 +189,166 @@ jobs:
             throw "ONECX_AUTH_KEY secret is missing"
           }
 
-          $uri = "${env:ONECX_URL}/api/v2/execution/playbook/${env:ONECX_PLAYBOOK_ID}/execute?projectId=${env:ONECX_PROJECT_ID}&checkLastExecution=false"
+          $encodedName = [uri]::EscapeDataString(
+            $env:ONECX_PLAYBOOK_NAME
+          )
 
-          Write-Host "ONE.CX Project : $env:ONECX_PROJECT_ID"
-          Write-Host "ONE.CX Playbook: $env:ONECX_PLAYBOOK_ID"
-          Write-Host "ONE.CX URL     : $uri"
+          $uri = "${env:ONECX_URL}/api/v2/execution/playbook?projectId=${env:ONECX_PROJECT_ID}&playbookName=${encodedName}&sort=NAME&ascending=ASC&offset=0&limit=100"
+
+          $headers = @{
+            "TestGuide-AuthKey" = $env:ONECX_AUTH_KEY
+            "Accept" = "application/json"
+          }
+
+          Write-Host "Resolving Playbook: $env:ONECX_PLAYBOOK_NAME"
+          Write-Host "ONE.CX Project   : $env:ONECX_PROJECT_ID"
+
+          $playbooks = @(
+            Invoke-RestMethod `
+              -Method Get `
+              -Uri $uri `
+              -Headers $headers
+          )
+
+          $matchingPlaybooks = @(
+            $playbooks |
+              Where-Object {
+                $_.metadata.name -eq $env:ONECX_PLAYBOOK_NAME
+              }
+          )
+
+          if ($matchingPlaybooks.Count -eq 0) {
+            throw "No Playbook named $env:ONECX_PLAYBOOK_NAME was found"
+          }
+
+          $latestPlaybook = $matchingPlaybooks |
+            Sort-Object revision -Descending |
+            Select-Object -First 1
+
+          $playbookId = [string]$latestPlaybook.playbookId
+          $playbookRevision = [string]$latestPlaybook.revision
+          $playbookProjectId = [string]$latestPlaybook.projectId
+
+          if ([string]::IsNullOrWhiteSpace($playbookId)) {
+            throw "Resolved Playbook has no playbookId"
+          }
+
+          if ($playbookProjectId -ne $env:ONECX_PROJECT_ID) {
+            throw "Resolved Playbook belongs to project $playbookProjectId instead of $env:ONECX_PROJECT_ID"
+          }
+
+          Write-Host "Playbook ID      : $playbookId"
+          Write-Host "Playbook Revision: $playbookRevision"
+          Write-Host "Playbook Project : $playbookProjectId"
+
+          "ONECX_PLAYBOOK_ID=$playbookId" |
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
+
+          "ONECX_PLAYBOOK_REVISION=$playbookRevision" |
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
+
+          $latestPlaybook |
+            ConvertTo-Json -Depth 20 |
+            Set-Content `
+              -Path "$env:GITHUB_WORKSPACE\resolved-playbook.json" `
+              -Encoding utf8
+
+      # Verify repository project matches the Playbook project.
+      - name: Verify Playbook project path
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $playbook = Get-Content `
+            -Path "$env:GITHUB_WORKSPACE\resolved-playbook.json" `
+            -Raw |
+            ConvertFrom-Json
+
+          $projectSteps = @(
+            $playbook.execution.testcases |
+              Where-Object {
+                $_.type -eq "project"
+              }
+          )
+
+          if ($projectSteps.Count -eq 0) {
+            throw "Resolved Playbook contains no project testcase"
+          }
+
+          if ($projectSteps.Count -gt 1) {
+            throw "Resolved Playbook contains more than one project testcase"
+          }
+
+          $playbookPath = [string]$projectSteps[0].relativePath
+          $repositoryPath = [string]$env:PROJECT_PATH
+
+          $normalizedPlaybookPath = $playbookPath.Replace("/", "\")
+          $normalizedRepositoryPath = $repositoryPath.Replace("/", "\")
+
+          Write-Host "Repository project: $normalizedRepositoryPath"
+          Write-Host "Playbook project  : $normalizedPlaybookPath"
+
+          if ($normalizedRepositoryPath -ne $normalizedPlaybookPath) {
+            throw "Repository project does not match the latest Playbook revision"
+          }
+
+      # Build ONE.CX execution request.
+      - name: Build ONE.CX request
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $request = @{
+            name = "$env:JIRA_KEY - $env:TARGET_ECU L2 Quality Gate"
+                  analysisExecutionMode = "sequential"
+              downstreamAnalysisPartitioning = "analysis"
+              expirationTimeInMinutes = 60
+              issueTrackerTickets = @(
+                "https://scoutmotors.atlassian.net/browse/$env:JIRA_KEY"
+              )
+              remainingRetriesOnError = 0
+            }
+          }
+
+          $json = $request |
+            ConvertTo-Json -Depth 10
+
+          $json |
+            Set-Content `
+              -Path "$env:GITHUB_WORKSPACE\onecx-request.json" `
+              -Encoding utf8
+
+          Write-Host $json
+
+      # Execute dynamically resolved Playbook.
+      - name: Execute ONE.CX Playbook
+        shell: powershell
+        env:
+          ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if (:IsNullOrWhiteSpace($env:ONECX_PLAYBOOK_ID)) {
+            throw "ONECX_PLAYBOOK_ID was not resolved"
+          }
+
+          $uri = "${env:ONECX_URL}/api/v2/execution/playbook/${env:ONECX_PLAYBOOK_ID}/execute?projectId=${env:ONECX_PROJECT_ID}&checkLastExecution=false"
 
           $headers = @{
             "TestGuide-AuthKey" = $env:ONECX_AUTH_KEY
             "Accept" = "*/*"
           }
+
+          Write-Host "ONE.CX Project  : $env:ONECX_PROJECT_ID"
+          Write-Host "Playbook Name   : $env:ONECX_PLAYBOOK_NAME"
+          Write-Host "Playbook ID     : $env:ONECX_PLAYBOOK_ID"
+          Write-Host "Playbook Revision: $env:ONECX_PLAYBOOK_REVISION"
 
           $body = Get-Content `
             -Path "$env:GITHUB_WORKSPACE\onecx-request.json" `
@@ -245,9 +360,6 @@ jobs:
             -Headers $headers `
             -ContentType "application/json" `
             -Body $body
-
-          Write-Host "ONE.CX response:"
-          $response | ConvertTo-Json -Depth 10
 
           $taskId = $response.taskIds |
             Select-Object -First 1
@@ -264,7 +376,7 @@ jobs:
               -Encoding utf8 `
               -Append
 
-      # Poll ONE.CX task status.
+      # Poll ONE.CX execution.
       - name: Wait for ONE.CX task
         shell: powershell
         env:
@@ -272,7 +384,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          if ([string]::IsNullOrWhiteSpace($env:TASK_ID)) {
+          if (:IsNullOrWhiteSpace($env:TASK_ID)) {
             throw "TASK_ID is missing"
           }
 
@@ -287,13 +399,12 @@ jobs:
           Write-Host "Task URL: $uri"
 
           for ($attempt = 1; $attempt -le 60; $attempt++) {
-
             $task = Invoke-RestMethod `
               -Method Get `
               -Uri $uri `
               -Headers $headers
 
-            $state = $task.state
+            $state = [string]$task.state
 
             Write-Host "Attempt ${attempt}: $state"
 
@@ -320,8 +431,11 @@ jobs:
                 Write-Host "Error: $($task.stateInfo.errorMessage)"
               }
 
-              Write-Host "Task response:"
-              $task | ConvertTo-Json -Depth 20
+              $task |
+                ConvertTo-Json -Depth 20 |
+                Set-Content `
+                  -Path "$env:GITHUB_WORKSPACE\onecx-task-final.json" `
+                  -Encoding utf8
 
               exit 1
             }
@@ -331,7 +445,10 @@ jobs:
 
           throw "ONE.CX execution timed out after 10 minutes"
 
-      # Publish workflow ll: powershell
+      # Publish execution summary.
+      - name: Summary
+        if: always()
+        shell: powershell
         run: |
           $parentSha = if ($env:PARENT_SHA) {
             $env:PARENT_SHA
@@ -341,6 +458,18 @@ jobs:
 
           $projectPath = if ($env:PROJECT_PATH) {
             $env:PROJECT_PATH
+          } else {
+            "Unavailable"
+          }
+
+          $playbookId = if ($env:ONECX_PLAYBOOK_ID) {
+            $env:ONECX_PLAYBOOK_ID
+          } else {
+            "Unavailable"
+          }
+
+          $revision = if ($env:ONECX_PLAYBOOK_REVISION) {
+            $env:ONECX_PLAYBOOK_REVISION
           } else {
             "Unavailable"
           }
@@ -364,7 +493,9 @@ jobs:
           | Parent SHA | $parentSha |
           | Project | $projectPath |
           | ONE.CX Project | $env:ONECX_PROJECT_ID |
-          | ONE.CX Playbook | $env:ONECX_PLAYBOOK_ID |
+          | Playbook Name | $env:ONECX_PLAYBOOK_NAME |
+          | Playbook ID | $playbookId |
+          | Playbook Revision | $revision |
           | ONE.CX Task | $taskId |
           "@ |
             Out-File `
