@@ -28,7 +28,7 @@ jobs:
       TEST_CASES: ${{ github.event.client_payload.test_cases }}
 
     steps:
-      # Validate inputs.
+      # Validate Jira and ONE.CX inputs.
       - name: Validate inputs
         shell: powershell
         run: |
@@ -66,7 +66,11 @@ jobs:
             throw "GitHub variable ONECX_PROJECT_ID is missing"
           }
 
-      # Verify Git.
+          if ([string]::IsNullOrWhiteSpace($env:ONECX_PLAYBOOK_NAME)) {
+            throw "ONECX_PLAYBOOK_NAME is missing"
+          }
+
+      # Verify Git is available.
       - name: Verify Git
         shell: powershell
         run: |
@@ -75,12 +79,12 @@ jobs:
           git --version
 
           if ($LASTEXITCODE -ne 0) {
-            throw "Git is not available on PATH"
+            throw "Git is not available on the runner PATH"
           }
 
           where.exe git
 
-      # Checkout parent and submodules.
+      # Checkout parent repository and all submodules.
       - name: Checkout eeint-Test-Automation
         uses: actions/checkout@v4
         with:
@@ -91,16 +95,13 @@ jobs:
           token: ${{ secrets.HIL_REPO_PAT }}
           path: eeint-Test-Automation
 
-      # Capture repository revision.
+      # Capture the exact repository revision.
       - name: Get repository SHA
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          $repoPath = Join-Path `
-            $env:GITHUB_WORKSPACE `
-            "eeint-Test-Automation"
-
+          $repoPath = Join-Path $env:GITHUB_WORKSPACE "eeint-Test-Automation"
           $parentSha = git -C "$repoPath" rev-parse HEAD
 
           if ($LASTEXITCODE -ne 0) {
@@ -112,69 +113,56 @@ jobs:
           Write-Host "Parent SHA: $parentSha"
 
           "PARENT_SHA=$parentSha" |
-            Out-File `
-              -FilePath $env:GITHUB_ENV `
-              -Encoding utf8 `
-              -Append
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
           git -C "$repoPath" submodule status --recursive
 
-      # Resolve ECU project.
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to read submodule status"
+          }
+
+      # Resolve the project from the Jira values.
       - name: Resolve ECU project
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          $repoPath = Join-Path `
-            $env:GITHUB_WORKSPACE `
-            "eeint-Test-Automation"
-
-          $projectDir = Join-Path `
-            $repoPath `
-            "Packages\$env:BENCH_NAME\L2_Quality_Gate\$env:TARGET_ECU"
+          $repoPath = Join-Path $env:GITHUB_WORKSPACE "eeint-Test-Automation"
+          $projectDir = Join-Path $repoPath "Packages\$env:BENCH_NAME\L2_Quality_Gate\$env:TARGET_ECU"
 
           Write-Host "Project directory: $projectDir"
 
-          if (-not (Test-Path "$projectDir")) {
+          if (-not (Test-Path -LiteralPath $projectDir -PathType Container)) {
             throw "Project directory not found: $projectDir"
           }
 
           $projects = @(
-            Get-ChildItem `
-              -Path "$projectDir" `
-              -Filter "*.prj" `
-              -File
+            Get-ChildItem -LiteralPath $projectDir -Filter "*.prj" -File
           )
 
-          Write-Host "Found $($projects.Count) project(s)"
+          Write-Host "Found $($projects.Count) project file(s)"
 
           foreach ($project in $projects) {
             Write-Host "PRJ: $($project.FullName)"
           }
 
           if ($projects.Count -eq 0) {
-            throw "No .prj file found"
+            throw "No .prj file found under $projectDir"
           }
 
           if ($projects.Count -gt 1) {
-            throw "Expected exactly one .prj file"
+            throw "Expected exactly one .prj file under $projectDir"
           }
 
           $absolutePath = $projects[0].FullName
-
-          $relativePath = $absolutePath.Substring(
-            $repoPath.Length + 1
-          )
+          $relativePath = $absolutePath.Substring($repoPath.Length + 1)
 
           Write-Host "Resolved project: $relativePath"
 
           "PROJECT_PATH=$relativePath" |
-            Out-File `
-              -FilePath $env:GITHUB_ENV `
-              -Encoding utf8 `
-              -Append
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      # Resolve latest Playbook revision.
+      # Resolve the latest matching Playbook revision.
       - name: Resolve latest ONE.CX Playbook
         shell: powershell
         env:
@@ -186,7 +174,7 @@ jobs:
             throw "ONECX_AUTH_KEY secret is missing"
           }
 
-          $encodedName = [uri]::EscapeDataString(
+          $encodedName = [System.Uri]::EscapeDataString(
             $env:ONECX_PLAYBOOK_NAME
           )
 
@@ -199,6 +187,7 @@ jobs:
 
           Write-Host "Resolving Playbook: $env:ONECX_PLAYBOOK_NAME"
           Write-Host "ONE.CX Project   : $env:ONECX_PROJECT_ID"
+          Write-Host "Lookup URL       : $uri"
 
           $response = Invoke-RestMethod `
             -Method Get `
@@ -215,62 +204,62 @@ jobs:
           Write-Host "Matching revisions: $($matchingPlaybooks.Count)"
 
           if ($matchingPlaybooks.Count -eq 0) {
-            throw "No matching Playbook found"
+            throw "No Playbook named '$env:ONECX_PLAYBOOK_NAME' was found"
           }
 
-          foreach ($pb in $matchingPlaybooks) {
-            Write-Host "Found Playbook ID=$($pb.playbookId) Revision=$($pb.revision) Project=$($pb.projectId)"
+          foreach ($playbook in $matchingPlaybooks) {
+            Write-Host "Found ID=$($playbook.playbookId) Revision=$($playbook.revision) Project=$($playbook.projectId)"
           }
 
-          $latestPlaybook = @(
+          $sortedPlaybooks = @(
             $matchingPlaybooks |
-              Sort-Object `
-                -Property @{Expression = { [int]$_.revision }} `
-                -Descending
-          )[0]
+              Sort-Object -Property @{
+                Expression = { [int]$_.revision }
+              } -Descending
+          )
+
+          $latestPlaybook = $sortedPlaybooks[0]
 
           if ($null -eq $latestPlaybook) {
-            throw "Unable to select latest Playbook"
+            throw "Unable to select the latest Playbook revision"
           }
 
-          $playbookId = [string]$latestPlaybook.playbookId
-          $playbookRevision = [string]$latestPlaybook.revision
-          $playbookProjectId = [string]$latestPlaybook.projectId
+          $playbookId = ([string]$latestPlaybook.playbookId).Trim()
+          $playbookRevision = ([string]$latestPlaybook.revision).Trim()
+          $playbookProjectId = ([string]$latestPlaybook.projectId).Trim()
+          $configuredProjectId = ([string]$env:ONECX_PROJECT_ID).Trim()
 
           Write-Host "Selected Playbook ID      : $playbookId"
           Write-Host "Selected Playbook Revision: $playbookRevision"
           Write-Host "Selected Playbook Project : $playbookProjectId"
 
-          if ($playbookProjectId.Trim() -ne $env:ONECX_PROJECT_ID.Trim()) {
-            throw "Resolved Playbook belongs to project $playbookProjectId instead of $env:ONECX_PROJECT_ID"
+          if ($playbookProjectId -ne $configuredProjectId) {
+            f $configuredProjectId"
           }
 
           "ONECX_PLAYBOOK_ID=$playbookId" |
-            Out-File `
-              -FilePath $env:GITHUB_ENV `
-              -Encoding utf8 `
-              -Append
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
           "ONECX_PLAYBOOK_REVISION=$playbookRevision" |
-            Out-File `
-              -FilePath $env:GITHUB_ENV `
-              -Encoding utf8 `
-              -Append
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-          $latestPlaybook |
-            ConvertTo-Json -Depth 20 |
-            Set-Content `
-              -Path "$env:GITHUB_WORKSPACE\resolved-playbook.json" `
-              -Encoding utf8
+          $playbookJson = $latestPlaybook |
+            ConvertTo-Json -Depth 30
 
-      # Verify Playbook project path.
+          [System.IO.File]::WriteAllText(
+            "$env:GITHUB_WORKSPACE\resolved-playbook.json",
+            $playbookJson,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+      # Verify the repository project matches the Playbook.
       - name: Verify Playbook project path
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
           $playbook = Get-Content `
-            -Path "$env:GITHUB_WORKSPACE\resolved-playbook.json" `
+            -LiteralPath "$env:GITHUB_WORKSPACE\resolved-playbook.json" `
             -Raw |
             ConvertFrom-Json
 
@@ -289,20 +278,17 @@ jobs:
             throw "Playbook contains more than one project testcase"
           }
 
-          $playbookPath = [string]$projectSteps[0].relativePath
-          $repositoryPath = [string]$env:PROJECT_PATH
-
-          $playbookPath = $playbookPath.Replace("/", "\")
-          $repositoryPath = $repositoryPath.Replace("/", "\")
+          $playbookPath = ([string]$projectSteps[0].relativePath).Replace("/", "\")
+          $repositoryPath = ([string]$env:PROJECT_PATH).Replace("/", "\")
 
           Write-Host "Repository project: $repositoryPath"
           Write-Host "Playbook project  : $playbookPath"
 
           if ($repositoryPath -ne $playbookPath) {
-            throw "Repository project does not match latest Playbook"
+            throw "Repository project does not match the latest Playbook revision"
           }
 
-      # Build execution request.
+      # Build the ONE.CX execution request.
       - name: Build ONE.CX request
         shell: powershell
         run: |
@@ -326,14 +312,15 @@ jobs:
           $json = $request |
             ConvertTo-Json -Depth 10
 
-          $json |
-            Set-Content `
-              -Path "$env:GITHUB_WORKSPACE\onecx-request.json" `
-              -Encoding utf8
+          [System.IO.File]::WriteAllText(
+            "$env:GITHUB_WORKSPACE\onecx-request.json",
+            $json,
+            [System.Text.UTF8Encoding]::new($false)
+          )
 
           Write-Host $json
 
-      # Execute selected Playbook.
+      # Execute the dynamically resolved Playbook.
       - name: Execute ONE.CX Playbook
         shell: powershell
         env:
@@ -341,8 +328,12 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          if ([string]::IsNullOrWhiteSpace($env:ONECX_PLAYBOOK_ID)) {
+          if (:IsNullOrWhiteSpace($env:ONECX_PLAYBOOK_ID)) {
             throw "ONECX_PLAYBOOK_ID was not resolved"
+          }
+
+          if (:IsNullOrWhiteSpace($env:ONECX_AUTH_KEY)) {
+            throw "ONECX_AUTH_KEY secret is missing"
           }
 
           $uri = "${env:ONECX_URL}/api/v2/execution/playbook/${env:ONECX_PLAYBOOK_ID}/execute?projectId=${env:ONECX_PROJECT_ID}&checkLastExecution=false"
@@ -352,13 +343,14 @@ jobs:
             "Accept" = "*/*"
           }
 
-          Write-Host "ONE.CX Project   : $env:ONECX_PROJECT_ID"
-          Write-Host "Playbook Name    : $env:ONECX_PLAYBOOK_NAME"
-          Write-Host "Playbook ID      : $env:ONECX_PLAYBOOK_ID"
-          Write-Host "Playbook Revision: $env:ONECX_PLAYBOOK_REVISION"
+          Write-Host "ONE.CX Project    : $env:ONECX_PROJECT_ID"
+          Write-Host "Playbook Name     : $env:ONECX_PLAYBOOK_NAME"
+          Write-Host "Playbook ID       : $env:ONECX_PLAYBOOK_ID"
+          Write-Host "Playbook Revision : $env:ONECX_PLAYBOOK_REVISION"
+          Write-Host "Execution URL     : $uri"
 
           $body = Get-Content `
-            -Path "$env:GITHUB_WORKSPACE\onecx-request.json" `
+            -LiteralPath "$env:GITHUB_WORKSPACE\onecx-request.json" `
             -Raw
 
           $response = Invoke-RestMethod `
@@ -374,22 +366,18 @@ jobs:
             ConvertTo-Json -Depth 10 |
             Write-Host
 
-          $taskId = $response.taskIds |
-            Select-Object -First 1
+          $taskId = @($response.taskIds)[0]
 
-          if (-not $taskId) {
+          if (:IsNullOrWhiteSpace([string]$taskId)) {
             throw "ONE.CX returned no taskId"
           }
 
           Write-Host "ONE.CX Task ID: $taskId"
 
           "TASK_ID=$taskId" |
-            Out-File `
-              -FilePath $env:GITHUB_ENV `
-              -Encoding utf8 `
-              -Append
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      # Poll execution task.
+      # Poll the ONE.CX task.
       - name: Wait for ONE.CX task
         shell: powershell
         env:
@@ -397,7 +385,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          if ([string]::IsNullOrWhiteSpace($env:TASK_ID)) {
+          if (:IsNullOrWhiteSpace($env:TASK_ID)) {
             throw "TASK_ID is missing"
           }
 
@@ -408,17 +396,16 @@ jobs:
 
           $uri = "${env:ONECX_URL}/api/v2/execution/task/${env:TASK_ID}?projectId=${env:ONECX_PROJECT_ID}"
 
-          Write-Host "Task ID : $env:TASK_ID"
-          Write-Host "Task URL: $uri"
+          Write-Host "Task ID  : $env:TASK_ID"
+          Write-Host "Task URL : $uri"
 
           for ($attempt = 1; $attempt -le 60; $attempt++) {
-
             $task = Invoke-RestMethod `
               -Method Get `
               -Uri $uri `
               -Headers $headers
 
-            $state = [string]$task.state
+            $state = ([string]$task.state).ToUpperInvariant()
 
             Write-Host "Attempt ${attempt}: $state"
 
@@ -434,7 +421,10 @@ jobs:
 
             if ($state -in @(
               "ERROR",
-    CANCELED"
+              "FAILED",
+              "ABORTED",
+              "CANCELLED",
+              "CANCELED"
             )) {
               Write-Host "ONE.CX execution failed"
 
@@ -442,12 +432,16 @@ jobs:
                 Write-Host "Error: $($task.stateInfo.errorMessage)"
               }
 
-              Write-Host "Final task response:"
+              $taskJson = $task |
+                ConvertTo-Json -Depth 30
 
-              $task |
-                ConvertTo-Json -Depth 20 |
-                Write-Host
+              [System.IO.File]::WriteAllText(
+                "$env:GITHUB_WORKSPACE\onecx-task-final.json",
+                $taskJson,
+                [System.Text.UTF8Encoding]::new($false)
+              )
 
+              Write-Host $taskJson
               exit 1
             }
 
