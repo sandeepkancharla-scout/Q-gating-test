@@ -12,7 +12,7 @@ jobs:
       - Windows
       - X64
 
-    timeout-minutes: 180
+    timeout-minutes: 5
 
     concurrency:
       group: ct-testguide-${{ github.event.client_payload.bench_id }}
