@@ -5,166 +5,522 @@ on:
     types:
       - ct_test_execution
 
-permissions:
-  contents: read
-
-env:
-  ONECX_URL: https://testguide-ssp.onecx.vwgroup.com
-  ONECX_PROJECT_ID: ${{ vars.ONECX_PROJECT_ID }}
-
 jobs:
-  phase-2:
+  ct-test-execution:
+
+    # This runner MUST physically be on the HIL/bench.
     runs-on:
       - self-hosted
       - Windows
       - X64
 
+    timeout-minutes: 5
+
     env:
+      REPO_PATH: 'D:\HIL\Testing\eeint-Test-Automation'
+
       JIRA_KEY: ${{ github.event.client_payload.jira_key }}
       BENCH_ID: ${{ github.event.client_payload.bench_id }}
       BENCH_NAME: ${{ github.event.client_payload.bench_name }}
       TARGET_ECU: ${{ github.event.client_payload.target_ecu }}
       TEST_CASES: ${{ github.event.client_payload.test_cases }}
-      PLAYBOOK_NAME: ${{ github.event.client_payload.playbook_name }}
+      PLAYBOOK: ${{ github.event.client_payload.playbook }}
 
     steps:
-      - name: Validate Jira payload
-        shell: powershell
+
+      # ==========================================================
+      # PHASE 1
+      # Validate Jira payload
+      # ==========================================================
+
+      - name: Validate Jira inputs
+        shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          Write-Host "Jira Key      : $env:JIRA_KEY"
-          Write-Host "Bench ID      : $env:BENCH_ID"
-          Write-Host "Bench Name    : $env:BENCH_NAME"
-          Write-Host "Target ECU    : $env:TARGET_ECU"
-          Write-Host "Test Cases    : $env:TEST_CASES"
-          Write-Host "Playbook Name : $env:PLAYBOOK_NAME"
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "CT TEST EXECUTION"
+          Write-Host "========================================"
+          Write-Host "Jira Key    : $env:JIRA_KEY"
+          Write-Host "Bench ID    : $env:BENCH_ID"
+          Write-Host "Bench Name  : $env:BENCH_NAME"
+          Write-Host "Target ECU  : $env:TARGET_ECU"
+          Write-Host "Test Cases  : $env:TEST_CASES"
+          Write-Host "Playbook    : $env:PLAYBOOK"
+          Write-Host "========================================"
 
-          if (-not $env:JIRA_KEY) {
-            throw "Jira Key missing"
+          $required = @{
+              "JIRA_KEY"    = $env:JIRA_KEY
+              "BENCH_ID"    = $env:BENCH_ID
+              "BENCH_NAME"  = $env:BENCH_NAME
+              "TARGET_ECU"  = $env:TARGET_ECU
+              "TEST_CASES"  = $env:TEST_CASES
+              "PLAYBOOK"    = $env:PLAYBOOK
           }
 
-          if (-not $env:BENCH_ID) {
-            throw "Bench ID missing"
+          foreach ($item in $required.GetEnumerator()) {
+
+              if ([string]::IsNullOrWhiteSpace($item.Value)) {
+                  throw "Required Jira input '$($item.Key)' is missing."
+              }
           }
 
-          if (-not $env:BENCH_NAME) {
-            throw "Bench Name missing"
-          }
 
-          if (-not $env:TARGET_ECU) {
-            throw "Target ECU missing"
-          }
+      # ==========================================================
+      # PHASE 2
+      # Validate execution is really happening on HIL
+      # ==========================================================
 
-          if (-not $env:TEST_CASES) {
-            throw "Test Cases missing"
-          }
-
-          if (-not $env:PLAYBOOK_NAME) {
-            throw "Playbook Name missing"
-          }
-
-          if (-not $env:ONECX_PROJECT_ID) {
-            throw "ONECX_PROJECT_ID repository variable missing"
-          }
-
-      - name: Resolve latest ONE.CX Playbook
-        shell: powershell
-        env:
-          ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+      - name: Validate HIL runner
+        shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          if (-not $env:ONECX_AUTH_KEY) {
-            throw "ONECX_AUTH_KEY secret missing"
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "HIL RUNNER"
+          Write-Host "========================================"
+
+          Write-Host "Machine:"
+          hostname
+
+          Write-Host ""
+          Write-Host "Git:"
+          git --version
+
+          Write-Host ""
+          Write-Host "Repository path:"
+          Write-Host "$env:REPO_PATH"
+
+          $root = Split-Path $env:REPO_PATH -Parent
+
+          if (-not (Test-Path $root)) {
+
+              Write-Host "Creating:"
+              Write-Host "$root"
+
+              New-Item `
+                  -ItemType Directory `
+                  -Path $root `
+                  -Force | Out-Null
           }
 
-          $baseUrl = $env:ONECX_URL.TrimEnd("/")
 
-          $encodedName = [System.Uri]::EscapeDataString(
-            $env:PLAYBOOK_NAME
+      # ==========================================================
+      # PHASE 3
+      # Clone/update test automation repository directly on HIL
+      # ==========================================================
+
+      - name: Update bench repository
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $repoPath = $env:REPO_PATH
+          $repoUrl  = "https://github.com/scout-motors/eeint-Test-Automation.git"
+
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "BENCH REPOSITORY"
+          Write-Host "========================================"
+
+          if (Test-Path "$repoPath\.git") {
+
+              Write-Host "Existing repository found."
+              Write-Host "Updating to latest main..."
+
+              git -C $repoPath fetch origin main
+
+              if ($LASTEXITCODE -ne 0) {
+                  throw "git fetch failed."
+              }
+
+              git -C $repoPath checkout main
+
+              if ($LASTEXITCODE -ne 0) {
+                  throw "git checkout main failed."
+              }
+
+              git -C $repoPath reset --hard origin/main
+
+              if ($LASTEXITCODE -ne 0) {
+                  throw "git reset failed."
+              }
+
+          }
+          else {
+
+              Write-Host "Repository does not exist."
+
+              if (Test-Path $repoPath) {
+
+                  $contents = @(
+                      Get-ChildItem `
+                          -Path $repoPath `
+                          -Force `
+                          -ErrorAction SilentlyContinue
+                  )
+
+                  if ($contents.Count -gt 0) {
+                      throw "Repository destination exists but is not a Git repository: $repoPath"
+                  }
+              }
+
+              Write-Host "Cloning directly onto HIL..."
+
+              git clone `
+                  --branch main `
+                  $repoUrl `
+                  $repoPath
+
+              if ($LASTEXITCODE -ne 0) {
+                  throw "Repository clone failed."
+              }
+          }
+
+          Write-Host ""
+          Write-Host "Current commit:"
+
+          git -C $repoPath log `
+              -1 `
+              --pretty=format:"%H %cd %s" `
+              --date=iso
+
+
+      # ==========================================================
+      # PHASE 4
+      # Update real Git submodules
+      # ==========================================================
+
+      - name: Update test project submodules
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $repoPath = $env:REPO_PATH
+
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "GIT SUBMODULES"
+          Write-Host "========================================"
+
+          git -C $repoPath submodule sync --recursive
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "Submodule sync failed."
+          }
+
+          git -C $repoPath submodule update `
+              --init `
+              --recursive
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "Submodule update failed."
+          }
+
+          Write-Host ""
+          Write-Host "Current submodules:"
+
+          git -C $repoPath submodule status --recursive
+
+
+      # ==========================================================
+      # PHASE 5
+      # Resolve BENCH NAME -> Git submodule
+      #
+      # NOTE:
+      # We use BENCH_NAME here.
+      # TARGET_ECU does NOT select the Git submodule.
+      # ==========================================================
+
+      - name: Resolve bench project
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $repoPath  = $env:REPO_PATH
+          $benchName = $env:BENCH_NAME
+
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "RESOLVE BENCH"
+          Write-Host "========================================"
+          Write-Host "Bench ID   : $env:BENCH_ID"
+          Write-Host "Bench Name : $benchName"
+
+          $rawSubmodules = @(
+              git -C $repoPath submodule status --recursive
           )
 
-          $uri = "{0}/api/v2/execution/playbook?projectId={1}&playbookName={2}&sort=NAME&ascending=ASC&offset=0&limit=100" -f `
-            $baseUrl, `
-            $env:ONECX_PROJECT_ID, `
-            $encodedName
-
-          $headers = @{
-            "TestGuide-AuthKey" = $env:ONECX_AUTH_KEY
-            "Accept" = "application/json"
+          if ($LASTEXITCODE -ne 0) {
+              throw "Unable to read Git submodules."
           }
 
-          Write-Host "Requested Playbook : $env:PLAYBOOK_NAME"
-          Write-Host "ONE.CX Project     : $env:ONECX_PROJECT_ID"
-          Write-Host "Lookup URL         : $uri"
+          if ($rawSubmodules.Count -eq 0) {
+              throw "No Git submodules found."
+          }
 
-          $response = Invoke-RestMethod `
-            -Method Get `
-            -Uri $uri `
-            -Headers $headers
+          $submodules = @()
 
-          $playbooks = @(
-            $response |
+          foreach ($line in $rawSubmodules) {
+
+              if ($line -match '^[\s\-\+U]*[0-9a-fA-F]+\s+(.+?)(?:\s+\(.*\))?$') {
+
+                  $relativePath = $Matches[1].Trim()
+
+                  $submodules += [PSCustomObject]@{
+                      RelativePath = $relativePath
+                      FullPath     = Join-Path $repoPath $relativePath
+                  }
+              }
+          }
+
+          Write-Host ""
+          Write-Host "Available submodules:"
+
+          foreach ($module in $submodules) {
+              Write-Host "  $($module.RelativePath)"
+          }
+
+          $matches = @(
+              $submodules |
               Where-Object {
-                $_.metadata.name -eq $env:PLAYBOOK_NAME
+
+                  $_.RelativePath.IndexOf(
+                      $benchName,
+                      [System.StringComparison]::OrdinalIgnoreCase
+                  ) -ge 0
               }
           )
 
-          Write-Host "Matching revisions: $($playbooks.Count)"
-
-          if ($playbooks.Count -eq 0) {
-            throw "Playbook '$env:PLAYBOOK_NAME' not found"
+          if ($matches.Count -eq 0) {
+              throw "No Git submodule matched bench_name '$benchName'."
           }
 
-          foreach ($playbook in $playbooks) {
-            Write-Host "ID=$($playbook.playbookId) Revision=$($playbook.revision) Project=$($playbook.projectId)"
+          if ($matches.Count -gt 1) {
+
+              Write-Host ""
+              Write-Host "Matching submodules:"
+
+              foreach ($match in $matches) {
+                  Write-Host "  $($match.RelativePath)"
+              }
+
+              throw "Multiple submodules matched bench_name '$benchName'."
           }
 
-          $latest = $playbooks |
-            Sort-Object -Property revision -Descending |
-            Select-Object -First 1
-
-          if (-not $latest) {
-            throw "Unable to select latest Playbook revision"
-          }
-
-          $playbookId = "$($latest.playbookId)".Trim()
-          $revision = "$($latest.revision)".Trim()
-          $projectId = "$($latest.projectId)".Trim()
+          $selected = $matches[0]
 
           Write-Host ""
-          Write-Host "Selected Playbook"
-          Write-Host "-----------------"
-          Write-Host "Name       : $env:PLAYBOOK_NAME"
-          Write-Host "ID         : $playbookId"
-          Write-Host "Revision   : $revision"
-          Write-Host "Project ID : $projectId"
+          Write-Host "Selected submodule:"
+          Write-Host "$($selected.RelativePath)"
 
-          if ($projectId -ne "$env:ONECX_PROJECT_ID".Trim()) {
-            throw "Playbook project does not match ONECX_PROJECT_ID"
+          Write-Host ""
+          Write-Host "Bench project path:"
+          Write-Host "$($selected.FullPath)"
+
+          "BENCH_SUBMODULE=$($selected.RelativePath)" >> $env:GITHUB_ENV
+          "BENCH_PATH=$($selected.FullPath)" >> $env:GITHUB_ENV
+
+
+      # ==========================================================
+      # PHASE 6
+      # Locate .prj inside selected HIL project
+      # ==========================================================
+
+      - name: Resolve PRJ file
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $benchPath = $env:BENCH_PATH
+
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "PROJECT FILE"
+          Write-Host "========================================"
+
+          if (-not (Test-Path $benchPath)) {
+              throw "Bench path does not exist: $benchPath"
           }
 
-          Add-Content `
-            -Path $env:GITHUB_ENV `
-            -Value "ONECX_PLAYBOOK_ID=$playbookId"
+          $projects = @(
+              Get-ChildItem `
+                  -Path $benchPath `
+                  -Filter "*.prj" `
+                  -File `
+                  -Recurse
+          )
 
-          Add-Content `
-            -Path $env:GITHUB_ENV `
-            -Value "ONECX_PLAYBOOK_REVISION=$revision"
+          if ($projects.Count -eq 0) {
+              throw "No .prj found under $benchPath"
+          }
 
-      - name: Phase 2 summary
-        shell: powershell
+          Write-Host ""
+          Write-Host "PRJ files:"
+
+          foreach ($project in $projects) {
+              Write-Host "  $($project.FullName)"
+          }
+
+          #
+          # Until we establish another selection rule,
+          # production execution must NOT guess if multiple
+          # project files exist.
+          #
+          if ($projects.Count -gt 1) {
+              throw "Multiple .prj files found. Refusing to select one automatically."
+          }
+
+          $project = $projects[0]
+
+          "PROJECT_PATH=$($project.FullName)" >> $env:GITHUB_ENV
+          "PROJECT_NAME=$($project.Name)" >> $env:GITHUB_ENV
+
+          Write-Host ""
+          Write-Host "Selected:"
+          Write-Host "$($project.FullName)"
+
+
+      # ==========================================================
+      # PHASE 7
+      # Normalize Jira Test Case IDs
+      # ==========================================================
+
+      - name: Parse Jira Test Cases
+        shell: pwsh
         run: |
-          Write-Host "======================================"
-          Write-Host "PHASE 2 COMPLETE"
-          Write-Host "======================================"
-          Write-Host "Jira       : $env:JIRA_KEY"
-          Write-Host "Bench ID   : $env:BENCH_ID"
-          Write-Host "Bench Name : $env:BENCH_NAME"
-          Write-Host "ECU        : $env:TARGET_ECU"
-          Write-Host "Test Cases : $env:TEST_CASES"
-          Write-Host "Playbook   : $env:PLAYBOOK_NAME"
-          Write-Host "ID         : $env:ONECX_PLAYBOOK_ID"
-          Write-Host "Revision   : $env:ONECX_PLAYBOOK_REVISION"
-          Write-Host "======================================"
+          $ErrorActionPreference = "Stop"
+
+          $testCases = @(
+              $env:TEST_CASES `
+                  -split '[,;]' |
+              ForEach-Object {
+                  $_.Trim()
+              } |
+              Where-Object {
+                  -not [string]::IsNullOrWhiteSpace($_)
+              }
+          )
+
+          if ($testCases.Count -eq 0) {
+              throw "No Test Case IDs received from Jira."
+          }
+
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "TEST CASES"
+          Write-Host "========================================"
+
+          foreach ($tc in $testCases) {
+              Write-Host "TC: $tc"
+          }
+
+          $normalized = $testCases -join ","
+
+          "NORMALIZED_TEST_CASES=$normalized" >> $env:GITHUB_ENV
+
+
+      # ==========================================================
+      # PHASE 8
+      # Validate dynamic execution context
+      # ==========================================================
+
+      - name: Validate test execution context
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "EXECUTION CONTEXT"
+          Write-Host "========================================"
+          Write-Host ""
+          Write-Host "Jira:"
+          Write-Host "  $env:JIRA_KEY"
+          Write-Host ""
+          Write-Host "Bench ID:"
+          Write-Host "  $env:BENCH_ID"
+          Write-Host ""
+          Write-Host "Bench Name:"
+          Write-Host "  $env:BENCH_NAME"
+          Write-Host ""
+          Write-Host "Project:"
+          Write-Host "  $env:PROJECT_PATH"
+          Write-Host ""
+          Write-Host "Target ECU:"
+          Write-Host "  $env:TARGET_ECU"
+          Write-Host ""
+          Write-Host "Test Cases:"
+          Write-Host "  $env:NORMALIZED_TEST_CASES"
+          Write-Host ""
+          Write-Host "Jira-selected Playbook:"
+          Write-Host "  $env:PLAYBOOK"
+          Write-Host ""
+          Write-Host "========================================"
+
+
+      # ==========================================================
+      # PHASE 9
+      # ECU TEST EXECUTION
+      #
+      # TCF              -> USE EXISTING PLAYBOOK CONFIG
+      # TCB              -> USE EXISTING PLAYBOOK CONFIG
+      # TEST RESOURCE    -> USE EXISTING PLAYBOOK CONFIG
+      #
+      # The Jira supplied PLAYBOOK is authoritative.
+      # ==========================================================
+
+      - name: Run ECU test on HIL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $playbook = $env:PLAYBOOK
+          $project  = $env:PROJECT_PATH
+          $ecu      = $env:TARGET_ECU
+          $testCases = $env:NORMALIZED_TEST_CASES
+
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "ECU TEST EXECUTION"
+          Write-Host "========================================"
+          Write-Host "Playbook : $playbook"
+          Write-Host "Project  : $project"
+          Write-Host "ECU      : $ecu"
+          Write-Host "ses"
+          Write-Host "========================================"
+
+          #
+          # IMPORTANT
+          #
+          # This is the ONLY remaining integration point.
+          #
+          # Insert the real TestGuide / HIL playbook execution
+          # command here.
+          #
+          # Example structure only:
+          #
+          # & "C:\Path\To\TestGuideCLI.exe" `
+          #      --playbook "$playbook" `
+          #      --project "$project" `
+          #      --ecu "$ecu" `
+          #      --test-cases "$testCases"
+          #
+          # Do NOT use the example executable until the actual
+          # HIL execution command is known.
+          #
+
+          throw @"
+          HIL project preparation succeeded.
+
+          Jira       : $env:JIRA_KEY
+          Bench      : $env:BENCH_NAME
+          ECU        : $ecu
+          Project    : $project
+          Playbook   : $playbook
+          Test Cases : $testCases
+
+          Test execution command has not yet been configured.
+          "@
