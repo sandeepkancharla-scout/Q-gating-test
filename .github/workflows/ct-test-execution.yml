@@ -24,7 +24,7 @@ jobs:
       BENCH_NAME: ${{ github.event.client_payload.bench_name }}
       TARGET_ECU: ${{ github.event.client_payload.target_ecu }}
       TEST_CASES: ${{ github.event.client_payload.test_cases }}
-      PLAYBOOK: ${{ github.event.client_payload.playbook }}
+      PLAYBOOK: ${{ github.event.client_payload.playbook_name }}
 
     steps:
 
