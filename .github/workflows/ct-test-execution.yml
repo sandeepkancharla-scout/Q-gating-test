@@ -144,7 +144,7 @@ jobs:
           repository: scout-motors/eeint-Test-Automation
           ref: main
           path: automation-source
-          token: ${{ secrets.AUTOMATION_REPO_TOKEN }}
+          token: ${{ secrets.HIL_REPO_PAT }}
           fetch-depth: 1
           submodules: false
           lfs: false
