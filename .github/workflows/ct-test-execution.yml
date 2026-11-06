@@ -15,7 +15,7 @@ jobs:
       - Windows
       - X64
 
-    timeout-minutes: 5
+    timeout-minutes: 180
 
     concurrency:
       group: ct-testguide-${{ github.event.client_payload.bench_id }}
@@ -34,16 +34,19 @@ jobs:
       PLAYBOOK: ${{ github.event.client_payload.playbook_name }}
 
       # ==========================================================
-      # REPOSITORY CONFIGURATION
+      # STATIC INFRASTRUCTURE CONFIGURATION
       # ==========================================================
 
-      AUTOMATION_REPO_URL: 'https://github.com/scout-motors/eeint-Test-Automation.git'
-      AUTOMATION_BRANCH: 'main'
+      AUTOMATION_REPOSITORY: 'scout-motors/eeint-Test-Automation'
+      AUTOMATION_REF: 'main'
 
-      # Repository copy on the GitHub self-hosted runner.
+      # actions/checkout downloads here, relative to GITHUB_WORKSPACE.
+      CHECKOUT_FOLDER: 'automation-source'
+
+      # Local replicated repository on the Cloud PC.
       LOCAL_ROOT: 'C:\HIL\Testing\eeint-Test-Automation'
 
-      # Equivalent path expected by TestGuide.
+      # Equivalent location visible to TestGuide.
       TESTGUIDE_ROOT: 'D:\HIL\Testing\eeint-Test-Automation'
 
     steps:
@@ -79,7 +82,9 @@ jobs:
           }
 
           foreach ($inputEntry in $requiredInputs.GetEnumerator()) {
-              if ([string]::IsNullOrWhiteSpace([string]$inputEntry.Value)) {
+              if ([System.String]::IsNullOrWhiteSpace(
+                  [System.String]$inputEntry.Value
+              )) {
                   throw "Required Jira input '$($inputEntry.Key)' is missing."
               }
           }
@@ -89,287 +94,252 @@ jobs:
 
       # ==========================================================
       # PHASE 2
-      # VALIDATE SELF-HOSTED RUNNER
+      # VALIDATE WINDOWS RUNNER
+      #
+      # Git CLI is intentionally not required.
       # ==========================================================
 
-      - name: Validate self-hosted runner
+      - name: Validate Windows runner
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
           Write-Host ""
           Write-Host "============================================"
-          Write-Host "SELF-HOSTED RUNNER"
+          Write-Host "WINDOWS SELF-HOSTED RUNNER"
+          Write-Host "============================================"
+          Write-Host "Machine       : $env:COMPUTERNAME"
+          Write-Host "Workspace     : $env:GITHUB_WORKSPACE"
+          Write-Host "Runner temp   : $env:RUNNER_TEMP"
+          Write-Host "Local root    : $env:LOCAL_ROOT"
+          Write-Host "TestGuide root: $env:TESTGUIDE_ROOT"
           Write-Host "============================================"
 
-          Write-Host "Machine:"
-          hostname
-
-          Write-Host ""
-          Write-Host "PowerShell:"
-          Write-Host $PSVersionTable.PSVersion
-
-          Write-Host ""
-          Write-Host "Git:"
-
-          git --version
-
-          if ($LASTEXITCODE -ne 0) {
-              throw "Git is not available on the self-hosted runner."
+          if ([System.String]::IsNullOrWhiteSpace(
+              $env:GITHUB_WORKSPACE
+          )) {
+              throw "GITHUB_WORKSPACE is missing."
           }
 
-          Write-Host ""
-          Write-Host "Local repository root:"
-          Write-Host "$env:LOCAL_ROOT"
-
-          Write-Host ""
-          Write-Host "TestGuide repository root:"
-          Write-Host "$env:TESTGUIDE_ROOT"
+          if ([System.String]::IsNullOrWhiteSpace(
+              $env:RUNNER_TEMP
+          )) {
+              throw "RUNNER_TEMP is missing."
+          }
 
       # ==========================================================
       # PHASE 3
-      # CLONE OR UPDATE COMPLETE AUTOMATION REPOSITORY
+      # DOWNLOAD AUTOMATION REPOSITORY WITHOUT GIT COMMANDS
+      #
+      # If Git is unavailable, actions/checkout can use the GitHub
+      # REST archive fallback.
+      #
+      # SUBMODULES ARE DISABLED:
+      # REST archive fallback does not recursively download them.
       # ==========================================================
 
-      - name: Checkout complete automation repository
+      - name: Download automation repository
+        uses: actions/checkout@v4
+        with:
+          repository: scout-motors/eeint-Test-Automation
+          ref: main
+          path: automation-source
+          token: ${{ secrets.AUTOMATION_REPO_TOKEN }}
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+          persist-credentials: false
+          clean: true
+
+      # ==========================================================
+      # PHASE 4
+      # VERIFY DOWNLOADED REPOSITORY
+      # ==========================================================
+
+      - name: Verify downloaded repository
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          $repoPath = $env:LOCAL_ROOT
-          $repoUrl  = $env:AUTOMATION_REPO_URL
-          $branch   = $env:AUTOMATION_BRANCH
+          $sourcePath = Join-Path `
+              $env:GITHUB_WORKSPACE `
+              $env:CHECKOUT_FOLDER
 
           Write-Host ""
           Write-Host "============================================"
-          Write-Host "PREPARE AUTOMATION REPOSITORY"
+          Write-Host "DOWNLOADED AUTOMATION REPOSITORY"
           Write-Host "============================================"
-          Write-Host "Repository URL:"
-          Write-Host "$repoUrl"
-          Write-Host ""
-          Write-Host "Local repository:"
-          Write-Host "$repoPath"
-          Write-Host ""
-          Write-Host "Branch:"
-          Write-Host "$branch"
+          Write-Host "Source:"
+          Write-Host "$sourcePath"
+          Write-Host "============================================"
 
-          if ([string]::IsNullOrWhiteSpace($repoUrl)) {
-              throw "AUTOMATION_REPO_URL is empty."
+          if (-not (Test-Path $sourcePath)) {
+              throw "actions/checkout output is missing: $sourcePath"
           }
 
-          if ([string]::IsNullOrWhiteSpace($branch)) {
-              throw "AUTOMATION_BRANCH is empty."
+          $sourceItems = @(
+              Get-ChildItem `
+                  -Path $sourcePath `
+                  -Force `
+                  -ErrorAction Stop
+          )
+
+          if ($sourceItems.Count -eq 0) {
+              throw "Downloaded repository is empty: $sourcePath"
           }
 
-          $gitDirectory = Join-Path $repoPath ".git"
+          Write-Host ""
+          Write-Host "Top-level downloaded items:"
 
-          # ------------------------------------------------------
-          # CLONE WHEN REPOSITORY IS MISSING
-          # ------------------------------------------------------
+          foreach ($sourceItem in $sourceItems) {
+              Write-Host "  $($sourceItem.FullName)"
+          }
 
-          if (-not (Test-Path $gitDirectory)) {
-              Write-Host ""
-              Write-Host "Repository is not currently cloned."
+          $gitModulesPath = Join-Path `
+              $sourcePath `
+              ".gitmodules"
 
-              $parentDirectory = Split-Path $repoPath -Parent
+          if (Test-Path $gitModulesPath) {
+              Write-Warning @"
+          The downloaded repository contains a .gitmodules file.
 
-              if (-not (Test-Path $parentDirectory)) {
-                  Write-Host ""
-                  Write-Host "Creating parent directory:"
-                  Write-Host "$parentDirectory"
+          Git CLI is unavailable, so recursive submodules were not
+          downloaded by actions/checkout REST fallback.
 
-                  New-Item `
-                      -ItemType Directory `
-                      -Path $parentDirectory `
-                      -Force |
-                  Out-Null
-              }
-
-              if (Test-Path $repoPath) {
-                  $existingItems = @(
-                      Get-ChildItem `
-                          -Path $repoPath `
-                          -Force `
-                          -ErrorAction SilentlyContinue
-                  )
-
-                  if ($existingItems.Count -gt 0) {
-                      Write-Host ""
-                      Write-Host "Existing non-Git contents:"
-
-                      foreach ($existingItem in $existingItems) {
-                          Write-Host "  $($existingItem.FullName)"
-                      }
-
-                      throw @"
-          The target directory exists but is not a Git repository:
-
-          $repoPath
-
-          The workflow will not delete or overwrite existing files.
-          Move or remove the existing contents, then rerun the workflow.
+          If the required PRJ is inside a submodule, add that repository
+          as a separate actions/checkout step.
           "@
+
+              Write-Host ""
+              Write-Host ".gitmodules content:"
+              Get-Content $gitModulesPath |
+                  ForEach-Object {
+                      Write-Host $_
                   }
-              }
-
-              Write-Host ""
-              Write-Host "Cloning repository and recursive submodules..."
-
-              git clone `
-                  --branch $branch `
-                  --recurse-submodules `
-                  $repoUrl `
-                  $repoPath
-
-              if ($LASTEXITCODE -ne 0) {
-                  throw @"
-          Repository clone failed.
-
-          Repository:
-          $repoUrl
-
-          If the repository is private, confirm that the Windows account
-          running the GitHub runner has permission to clone the repository.
-          "@
-              }
-          }
-
-          # ------------------------------------------------------
-          # UPDATE WHEN REPOSITORY ALREADY EXISTS
-          # ------------------------------------------------------
-
-          else {
-              Write-Host ""
-              Write-Host "Existing Git repository found."
-
-              Write-Host ""
-              Write-Host "Configuring origin URL..."
-
-              git -C $repoPath remote set-url origin $repoUrl
-
-              if ($LASTEXITCODE -ne 0) {
-                  throw "Unable to configure the origin repository URL."
-              }
-
-              Write-Host ""
-              Write-Host "Fetching origin/$branch..."
-
-              git -C $repoPath fetch `
-                  --prune `
-                  origin `
-                  $branch
-
-              if ($LASTEXITCODE -ne 0) {
-                  throw "git fetch failed."
-              }
-
-              Write-Host ""
-              Write-Host "Checking out $branch..."
-
-              git -C $repoPath checkout $branch
-
-              if ($LASTEXITCODE -ne 0) {
-                  throw "git checkout $branch failed."
-              }
-
-              Write-Host ""
-              Write-Host "Resetting local branch to origin/$branch..."
-
-              git -C $repoPath reset `
-                  --hard `
-                  "origin/$branch"
-
-              if ($LASTEXITCODE -ne 0) {
-                  throw "git reset to origin/$branch failed."
-              }
-
-              Write-Host ""
-              Write-Host "Cleaning untracked repository files..."
-
-              git -C $repoPath clean `
-                  -fd
-
-              if ($LASTEXITCODE -ne 0) {
-                  throw "git clean failed."
-              }
-          }
-
-          # ------------------------------------------------------
-          # SYNCHRONIZE AND UPDATE SUBMODULES
-          # ------------------------------------------------------
-
-          Write-Host ""
-          Write-Host "============================================"
-          Write-Host "SUBMODULE SYNCHRONIZATION"
-          Write-Host "============================================"
-
-          git -C $repoPath submodule sync --recursive
-
-          if ($LASTEXITCODE -ne 0) {
-              throw "git submodule sync failed."
-          }
-
-          Write-Host ""
-          Write-Host "Initializing and updating recursive submodules..."
-
-          git -C $repoPath submodule update `
-              --init `
-              --recursive `
-              --force
-
-          if ($LASTEXITCODE -ne 0) {
-              throw @"
-          Recursive submodule checkout failedhe GitHub runner account has access to every
-          repository referenced by .gitmodules.
-          "@
-          }
-
-          Write-Host ""
-          Write-Host "============================================"
-          Write-Host "CURRENT REPOSITORY COMMIT"
-          Write-Host "============================================"
-
-          git -C $repoPath log `
-              -1 `
-              --pretty=format:"%H %cd %s" `
-              --date=iso
-
-          if ($LASTEXITCODE -ne 0) {
-              throw "Unable to read the current repository commit."
-          }
-
-          Write-Host ""
-          Write-Host ""
-          Write-Host "============================================"
-          Write-Host "SUBMODULE STATUS"
-          Write-Host "============================================"
-
-          git -C $repoPath submodule status --recursive
-
-          if ($LASTEXITCODE -ne 0) {
-              throw "Unable to read recursive submodule status."
           }
 
       # ==========================================================
-      # PHASE 4
-      # VERIFY PROJECT FILES
+      # PHASE 5
+      # MIRROR DOWNLOADED FILES TO C:\HIL\Testing\...
+      #
+      # ROBOCOPY:
+      # exit codes 0-7 are successful/non-fatal.
+      # exit codes 8+ indicate failure.
       # ==========================================================
 
-      - name: Verify project files
+      - name: Replicate repository to local C drive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $sourcePath = Join-Path `
+              $env:GITHUB_WORKSPACE `
+              $env:CHECKOUT_FOLDER
+
+          $destinationPath = $env:LOCAL_ROOT
+
+          Write-Host ""
+          Write-Host "============================================"
+          Write-Host "LOCAL REPOSITORY REPLICATION"
+          Write-Host "============================================"
+          Write-Host "Source:"
+          Write-Host "$sourcePath"
+          Write-Host ""
+          Write-Host "Destination:"
+          Write-Host "$destinationPath"
+          Write-Host "============================================"
+
+          if (-not (Test-Path $sourcePath)) {
+              throw "Checkout source does not exist: $sourcePath"
+          }
+
+          $destinationParent = Split-Path `
+              $destinationPath `
+              -Parent
+
+          if (-not (Test-Path $destinationParent)) {
+              New-Item `
+                  -ItemType Directory `
+                  -Path $destinationParent `
+                  -Force |
+              Out-Null
+          }
+
+          if (-not (Test-Path $destinationPath)) {
+              New-Item `
+                  -ItemType Directory `
+                  -Path $destinationPath `
+                  -Force |
+              Out-Null
+          }
+
+          # /MIR recreates the downloaded repository exactly.
+          # /R and /W prevent long retries on locked files.
+          # /XD excludes checkout metadata if present.
+
+          & robocopy `
+              $sourcePath `
+              $destinationPath `
+              /MIR `
+              /R:2 `
+              /W:2 `
+              /COPY:DAT `
+              /DCOPY:DAT `
+              /NP `
+              /NJH `
+              /NJS `
+              /XD ".git"
+
+          $robocopyExitCode = $LASTEXITCODE
+
+          Write-Host ""
+          Write-Host "Robocopy exit code: $robocopyExitCode"
+
+          if ($robocopyExitCode -ge 8) {
+              throw "Repository replication failed with Robocopy exit code $robocopyExitCode."
+          }
+
+          if (-not (Test-Path $destinationPath)) {
+              throw "Local repository destination is missing after replication."
+          }
+
+          $localItems = @(
+              Get-ChildItem `
+                  -Path $destinationPath `
+                  -Force `
+                  -ErrorAction Stop
+          )
+
+          if ($localItems.Count -eq 0) {
+              throw "Local repository is empty after replication."
+          }
+
+          Write-Host ""
+          Write-Host "Repository replicated successfully."
+
+      # ==========================================================
+      # PHASE 6
+      # DISCOVER PRJ FILES
+      # ==========================================================
+
+      - name: Discover project files
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
           $repositoryRoot = $env:LOCAL_ROOT
 
-          if (-not (Test-Path $repositoryRoot)) {
-              throw "Local repository does not exist: $repositoryRoot"
-          }
-
           Write-Host ""
           Write-Host "============================================"
           Write-Host "PROJECT FILE DISCOVERY"
           Write-Host "============================================"
+          Write-Host "Repository:"
+          Write-Host "$repositoryRoot"
+          Write-Host "============================================"
+
+          if (-not (Test-Path $repositoryRoot)) {
+              throw "Local repository does not exist: $repositoryRoot"
+          }
 
           $projects = @(
               Get-ChildItem `
@@ -380,28 +350,43 @@ jobs:
                   -ErrorAction SilentlyContinue
           )
 
-          Write-Host "PRJ files found: $($projects.Count)"
           Write-Host ""
+          Write-Host "PRJ files found: $($projects.Count)"
 
           foreach ($project in $projects) {
               Write-Host "  $($project.FullName)"
           }
 
           if ($projects.Count -eq 0) {
+              $gitModulesPath = Join-Path `
+                  $repositoryRoot `
+                  ".gitmodules"
+
+              if (Test-Path $gitModulesPath) {
+                  throw @"
+          No PRJ files were found in the downloaded main repository.
+
+          The repository contains .gitmodules, but actions/checkout REST
+          fallback cannot recursively retrieve submodules without Git CLI.
+
+          Add the project-containing submodule repository as another
+          actions/checkout step.
+          "@
+              }
+
               throw @"
-          The repository and recursive submodules were populated, but no
-          .prj files were found under:
+          No PRJ files were found under:
 
           $repositoryRoot
 
-          Check whether the project file has a different extension or
-          belongs to a submodule that the runner cannot access.
+          Confirm that the PRJ files are committed directly to
+          scout-motors/eeint-Test-Automation.
           "@
           }
 
       # ==========================================================
-      # PHASE 5
-      # NORMALIZE JIRA TEST CASE IDS
+      # PHASE 7
+      # NORMALIZE TEST CASE IDS FROM JIRA
       # ==========================================================
 
       - name: Parse Jira Test Cases
@@ -415,7 +400,7 @@ jobs:
                   $_.Trim()
               } |
               Where-Object {
-                  -not :IsNullOrWhiteSpace($_)
+                  -not [System.String]::IsNullOrWhiteSpace($_)
               }
           )
 
@@ -443,7 +428,7 @@ jobs:
                   -Append
 
       # ==========================================================
-      # PHASE 6
+      # PHASE 8
       # RESOLVE PRJ USING JIRA BENCH_NAME
       # ==========================================================
 
@@ -453,7 +438,7 @@ jobs:
           $ErrorActionPreference = "Stop"
 
           $repositoryRoot = $env:LOCAL_ROOT
-          $benchName      = $env:BENCH_NAME
+          $benchName = $env:BENCH_NAME
 
           Write-Host ""
           Write-Host "============================================"
@@ -464,7 +449,7 @@ jobs:
           Write-Host ""
           Write-Host "Jira Bench Name:"
           Write-Host "$benchName"
-          Write-Host ""
+          Write-Host "============================================"
 
           $projects = @(
               Get-ChildItem `
@@ -476,7 +461,7 @@ jobs:
           )
 
           if ($projects.Count -eq 0) {
-              throw "No .prj files were found under $repositoryRoot"
+              throw "No PRJ files are available under $repositoryRoot"
           }
 
           $matches = @(
@@ -498,29 +483,27 @@ jobs:
               }
 
               throw @"
-          No PRJ file path matched the Jira bench name:
+          No PRJ file path matched Jira bench_name:
 
           $benchName
 
-          The workflow currently expects bench_name to appear somewhere
-          in the PRJ directory or filename.
+          The current selection rule expects bench_name to appear
+          somewhere in the PRJ directory path or filename.
           "@
           }
 
           if ($matches.Count -gt 1) {
               Write-Host ""
-              Write-Host "Multiple projects matched bench '$benchName':"
+              Write-Host "Matching PRJ files:"
 
               foreach ($match in $matches) {
                   Write-Host "  $($match.FullName)"
               }
 
               throw @"
-          Multiple PRJ files matched bench '$benchName'.
+          More than one PRJ file matched bench_name '$benchName'.
 
           The workflow refuses to choose a project automatically.
-          Add a more specific Jira bench_name or introduce an explicit
-          project mapping before enabling production execution.
           "@
           }
 
@@ -528,7 +511,7 @@ jobs:
 
           Write-Host ""
           Write-Host "============================================"
-          Write-Host "LOCAL PRJ FOUND"
+          Write-Host "LOCAL PRJ SELECTED"
           Write-Host "============================================"
           Write-Host "$($selectedProject.FullName)"
           Write-Host "============================================"
@@ -540,8 +523,8 @@ jobs:
                   -Append
 
       # ==========================================================
-      # PHASE 7
-      # MAP LOCAL C: PATH TO TESTGUIDE D: PATH
+      # PHASE 9
+      # MAP LOCAL C PATH TO TESTGUIDE D PATH
       # ==========================================================
 
       - name: Create TestGuide PRJ Path
@@ -574,7 +557,7 @@ jobs:
               $relativePath.StartsWith("..") -or
               [System.IO.Path]::IsPathRooted($relativePath)
           ) {
-              throw "Resolved PRJ is outside the configured LOCAL_ROOT."
+              throw "Resolved PRJ is outside LOCAL_ROOT."
           }
 
           $testGuideProjectPath = Join-Path `
@@ -585,16 +568,14 @@ jobs:
           Write-Host "============================================"
           Write-Host "PROJECT PATH MAPPING"
           Write-Host "============================================"
-          Write-Host ""
-          Write-Host "LOCAL PRJ:"
+          Write-Host "Local PRJ:"
           Write-Host "$localProject"
           Write-Host ""
-          Write-Host "RELATIVE PATH:"
+          Write-Host "Relative path:"
           Write-Host "$relativePath"
           Write-Host ""
-          Write-Host "TESTGUIDE PRJ:"
+          Write-Host "TestGuide PRJ:"
           Write-Host "$testGuideProjectPath"
-          Write-Host ""
           Write-Host "============================================"
 
           "PROJECT_RELATIVE_PATH=$relativePath" |
@@ -610,11 +591,11 @@ jobs:
                   -Append
 
       # ==========================================================
-      # PHASE 8
-      # PREPARE TASK-BASED TESTGUIDE REQUEST
+      # PHASE 10
+      # PREPARE TASK-BASED REQUEST
       #
-      # Property names remain placeholders until the real
-      # TestGuide task request schema is confirmed.
+      # The field names are placeholders until the real TestGuide
+      # task request schema is confirmed.
       # ==========================================================
 
       - name: Prepare TestGuide Task
@@ -628,7 +609,7 @@ jobs:
                   $_.Trim()
               } |
               Where-Object {
-                  -not :IsNullOrWhiteSpace($_)
+                  -not [System.String]::IsNullOrWhiteSpace($_)
               }
           )
 
@@ -676,8 +657,8 @@ jobs:
                   -Append
 
       # ==========================================================
-      # PHASE 9
-      # SHOW FINAL EXECUTION CONTEXT
+      # PHASE 11
+      # FINAL EXECUTION CONTEXT
       # ==========================================================
 
       - name: Show final TestGuide execution context
@@ -701,22 +682,21 @@ jobs:
           Write-Host "============================================"
 
       # ==========================================================
-      # PHASE 10
-      # TESTGUIDE TASK EXECUTION PLACEHOLDER
+      # PHASE 12
+      # TESTGUIDE POST/RUN PLACEHOLDER
       #
-      # The workflow does not call an unverified production API.
-      # When the real endpoint/body is confirmed:
-      #
-      # 1. Configure TESTGUIDE_TASK_URL
-      # 2. Configure TESTGUIDE_API_TOKEN if required
-      # 3. Confirm the request property names from Phase 8
-      # 4. Enable the Invoke-RestMethod section
+      # Replace this phase after confirming:
+      # 1. Task creation endpoint
+      # 2. Task run endpoint
+      # 3. Request schema
+      # 4. Authentication method
       # ==========================================================
 
       - name: TestGuide Task Execution Placeholder
         shell: pwsh
         env:
-          TESTGUIDE_TASK_URL: ${{ secrets.TESTGUIDE_TASK_URL }}
+          TESTGUIDE_CREATE_TASK_URL: ${{ secrets.TESTGUIDE_CREATE_TASK_URL }}
+          TESTGUIDE_RUN_TASK_URL: ${{ secrets.TESTGUIDE_RUN_TASK_URL }}
           TESTGUIDE_API_TOKEN: ${{ secrets.TESTGUIDE_API_TOKEN }}
         run: |
           $ErrorActionPreference = "Stop"
@@ -732,79 +712,86 @@ jobs:
           Write-Host "============================================"
 
           if (-not (Test-Path $env:TESTGUIDE_TASK_FILE)) {
-              throw "TestGuide task JSON file does not exist."
+              throw "TestGuide task JSON file is missing."
           }
 
-          if (:IsNullOrWhiteSpace($env:TESTGUIDE_TASK_URL)) {
+          if ([System.String]::IsNullOrWhiteSpace(
+              $env:TESTGUIDE_CREATE_TASK_URL
+          )) {
               Write-Warning @"
-          TESTGUIDE_TASK_URL is not configured.
+          TESTGUIDE_CREATE_TASK_URL is not configured.
 
-          Repository checkout, submodule checkout, PRJ resolution,
-          C-to-D path mapping and task JSON generation completed.
+          Repository download, C-drive replication, PRJ resolution,
+          C-to-D mapping, and task JSON preparation succeeded.
 
-          The workflow is stopping before the unverified TestGuide
-          production API call.
+          The workflow will stop before calling the unverified
+          TestGuide task API.
           "@
 
               exit 0
           }
 
-          if (:IsNullOrWhiteSpace($env:TESTGUIDE_API_TOKEN)) {
-              throw "TESTGUIDE_API_TOKEN is missing."
+          if ([System.String]::IsNullOrWhiteSpace(
+              $env:TESTGUIDE_RUN_TASK_URL
+          )) {
+              throw "TESTGUIDE_RUN_TASK_URL is missing."
           }
 
-          $headers = @{
-              Authorization = "Bearer $env:TESTGUIDE_API_TOKEN"
-              Accept        = "application/json"
+          if ([System.String]::IsNullOrWhiteSpace(
+              $env:TESTGUIDE_API_TOKEN
+          )) {
+              throw "TESTGUIDE_API_TOKEN is missing."
           }
 
           $requestBody = Get-Content `
               -Path $env:TESTGUIDE_TASK_FILE `
               -Raw
 
+          $headers = @{
+              Authorization = "Bearer $env:TESTGUIDE_API_TOKEN"
+              Accept        = "application/json"
+          }
+
           Write-Host ""
-          Write-Host "TestGuide URL is configured."
-          Write-Host "Task request is prepared."
-          Write-Host ""
-          Write-Host "The POST remains disabled until the endpoint and"
-          Write-Host "request schema are verified."
+          Write-Host "Task request and API configuration are ready."
+          Write-Host "The create/run calls remain disabled until the"
+          Write-Host "TestGuide endpoint schemas are confirmed."
 
           # ======================================================
-          # ENABLE ONLY AFTER VERIFYING TESTGUIDE API
+          # CREATE TASK PLACEHOLDER
           # ======================================================
           #
-          # $response = Invoke-RestMethod `
+          # $createResponse = Invoke-RestMethod `
           #     -Method POST `
-          #     -Uri $env:TESTGUIDE_TASK_URL `
+          #     -Uri $env:TESTGUIDE_CREATE_TASK_URL `
           #     -Headers $headers `
           #     -ContentType "application/json" `
           #     -Body $requestBody
           #
-          # if ($null -eq $response) {
-          #     throw "TestGuide returned an empty response."
+          # $taskId = [System.String]$createResponse.taskId
+          #
+          # if ([System.String]::IsNullOrWhiteSpace($taskId)) {
+          #     throw "Create-task response did not contain taskId."
           # }
           #
-          # Write-Host ""
-          # Write-Host "TestGuide response:"
+          # Write-Host "Task created: $taskId"
           #
-          # $response |
+          # $runUrl = $env:TESTGUIDE_RUN_TASK_URL.Replace(
+          #     "{taskId}",
+          #     $taskId
+          # )
+          #
+          # $runResponse = Invoke-RestMethod `
+          #     -Method POST `
+          #     -Uri $runUrl `
+          #     -Headers $headers `
+          #     -ContentType "application/json"
+          #
+          # Write-Host "Task started: $taskId"
+          #
+          # $runResponse |
           #     ConvertTo-Json -Depth 20 |
           #     Write-Host
-          #
-          # $taskId = [string]$response.taskId
-          #
-          # if (:IsNullOrWhiteSpace($taskId)) {
-          #     throw "TestGuide response did not contain taskId."
-          # }
-          #
-          # "TESTGUIDE_TASK_ID=$taskId" |
-          #     Out-File `
-          #         -FilePath $env:GITHUB_ENV `
-          #         -Encoding utf8 `
-          #         -Append
-          #
-          # Write-Host ""
-          # Write-Host "TestGuide task created: $taskId"
 
           Write-Host ""
           Write-Host "============================================"
@@ -812,8 +799,8 @@ jobs:
           Write-Host "============================================"
 
       # ==========================================================
-      # PHASE 11
-      # GITHUB EXECUTION SUMMARY
+      # PHASE 13
+      # GITHUB SUMMARY
       # ==========================================================
 
       - name: Publish workflow summary
@@ -835,8 +822,11 @@ jobs:
           | TestGuide PRJ | $env:TESTGUIDE_PROJECT_PATH |
           | Job status | ${{ job.status }} |
 
-          The TestGuide API POST remains disabled until the endpoint
-          and task request schema are verified.
+          Repository content was retrieved with actions/checkout and
+          replicated to C:\ without invoking Git CLI.
+
+          TestGuide task creation and execution remain disabled until
+          the verified API endpoints and request schema are supplied.
           "@ |
               Out-File `
                   -FilePath $env:GITHUB_STEP_SUMMARY `
