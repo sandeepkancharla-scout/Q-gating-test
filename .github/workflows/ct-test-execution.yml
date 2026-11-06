@@ -36,22 +36,21 @@ jobs:
 
       LOCAL_ROOT: 'C:\HIL\Testing\eeint-Test-Automation'
 
-      # Current known-good configuration
+      # Current known configuration
       CONFIGURATION_FOLDER: 'SUBSYS1'
 
       # ==========================================================
-      # ONECX
-      #
-      # Project ID is in GitHub Actions Variables.
+      # ONE.CX
+      # Project ID is stored in GitHub Variables
       # ==========================================================
 
       ONECX_PROJECT_ID: ${{ vars.ONECX_PROJECT_ID }}
 
       # ==========================================================
-      # TESTGUIDE
+      # ONE.CX EXECUTION API
       # ==========================================================
 
-      TESTGUIDE_BASE_URL: 'https://testguide-ssp.onecx.vwgroup.com'
+      ONECX_URL: 'https://testguide-ssp.onecx.vwgroup.com'
 
     steps:
 
@@ -114,7 +113,7 @@ jobs:
 
 
       # ==========================================================
-      # 2. RESOLVE TESTGUIDE BENCH
+      # 2. RESOLVE BENCH
       # ==========================================================
 
       - name: Resolve TestGuide bench
@@ -166,19 +165,14 @@ jobs:
           "XIL_IDENTIFIER=$xilIdentifier" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'TESTGUIDE BENCH'
-          Write-Host '========================================'
           Write-Host "Bench     : $testGuideBench"
           Write-Host "Workspace : $workspaceRoot"
           Write-Host "Step      : $stepName"
           Write-Host "XIL       : $xilIdentifier"
-          Write-Host '========================================'
 
 
       # ==========================================================
-      # 3. RESOLVE PACKAGE FROM JIRA BENCH NAME
+      # 3. RESOLVE BENCH PACKAGE
       # ==========================================================
 
       - name: Resolve bench package
@@ -186,11 +180,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $benchName = $env:BENCH_NAME.Trim()
-
           $packageRoot = Join-Path `
             $env:LOCAL_ROOT `
-            "Packages\$benchName"
+            "Packages\$($env:BENCH_NAME.Trim())"
 
           if (-not (Test-Path -LiteralPath $packageRoot)) {
             throw "Bench package not found: $packageRoot"
@@ -199,13 +191,7 @@ jobs:
           "PACKAGE_ROOT=$packageRoot" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'BENCH PACKAGE'
-          Write-Host '========================================'
-          Write-Host "Bench Name : $benchName"
-          Write-Host "Package    : $packageRoot"
-          Write-Host '========================================'
+          Write-Host "Package: $packageRoot"
 
 
       # ==========================================================
@@ -239,7 +225,6 @@ jobs:
             $selectedTbc = Get-Item -LiteralPath $expectedTbc
           }
           else {
-
             $tbcFiles = @(
               Get-ChildItem `
                 -LiteralPath $configRoot `
@@ -255,12 +240,10 @@ jobs:
             $selectedTbc = $tbcFiles[0]
           }
 
-
           if (Test-Path -LiteralPath $expectedTcf) {
             $selectedTcf = Get-Item -LiteralPath $expectedTcf
           }
           else {
-
             $tcfFiles = @(
               Get-ChildItem `
                 -LiteralPath $configRoot `
@@ -276,19 +259,14 @@ jobs:
             $selectedTcf = $tcfFiles[0]
           }
 
-
-          $tbcRelative = (
-            [System.IO.Path]::GetRelativePath(
-              $env:LOCAL_ROOT,
-              $selectedTbc.FullName
-            )
+          $tbcRelative = [System.IO.Path]::GetRelativePath(
+            $env:LOCAL_ROOT,
+            $selectedTbc.FullName
           )
 
-          $tcfRelative = (
-            [System.IO.Path]::GetRelativePath(
-              $env:LOCAL_ROOT,
-              $selectedTcf.FullName
-            )
+          $tcfRelative = [System.IO.Path]::GetRelativePath(
+            $env:LOCAL_ROOT,
+            $selectedTcf.FullName
           )
 
           "TBC_RELATIVE_PATH=$tbcRelative" |
@@ -297,23 +275,14 @@ jobs:
           "TCF_RELATIVE_PATH=$tcfRelative" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'CONFIGURATION FILES'
-          Write-Host '========================================'
           Write-Host "TBC : $tbcRelative"
           Write-Host "TCF : $tcfRelative"
-          Write-Host '========================================'
 
 
       # ==========================================================
-      # 5. RESOLVE EXACT ECU PROJECT
+      # 5. RESOLVE EXACT ECU PRJ
       #
-      # TARGET_ECU=VAS_FL
-      #
-      # ->
-      #
-      # VAS_FL_L2QualityGate.prj
+      # VAS_FL -> VAS_FL_L2QualityGate.prj
       # ==========================================================
 
       - name: Resolve target ECU project
@@ -322,10 +291,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           $targetEcu = $env:TARGET_ECU.Trim()
-
-          $expectedProject = (
-            "${targetEcu}_L2QualityGate.prj"
-          )
+          $expectedProject = "${targetEcu}_L2QualityGate.prj"
 
           Write-Host ''
           Write-Host '========================================'
@@ -345,7 +311,6 @@ jobs:
           )
 
           if ($matches.Count -eq 0) {
-
             Write-Host ''
             Write-Host 'Available L2 Quality Gate projects:'
 
@@ -362,40 +327,21 @@ jobs:
             throw "Project not found: $expectedProject"
           }
 
-
           if ($matches.Count -gt 1) {
-
-            Write-Host ''
-            Write-Host 'Multiple project matches:'
-
-            $matches |
-              ForEach-Object {
-                Write-Host "  $($_.FullName)"
-              }
-
             throw "Multiple $expectedProject files found."
           }
 
-
           $selected = $matches[0]
 
-          $relative = (
-            [System.IO.Path]::GetRelativePath(
-              $env:LOCAL_ROOT,
-              $selected.FullName
-            )
+          $relative = [System.IO.Path]::GetRelativePath(
+            $env:LOCAL_ROOT,
+            $selected.FullName
           )
 
           "PROJECT_RELATIVE_PATH=$relative" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'SELECTED PROJECT'
-          Write-Host '========================================'
-          Write-Host "Full     : $($selected.FullName)"
-          Write-Host "Relative : $relative"
-          Write-Host '========================================'
+          Write-Host "Selected PRJ: $relative"
 
 
       # ==========================================================
@@ -430,7 +376,7 @@ jobs:
 
 
       # ==========================================================
-      # 7. GENERATE COMPLETE TESTGUIDE PLAYBOOK JSON
+      # 7. GENERATE PLAYBOOK JSON
       # ==========================================================
 
       - name: Generate TestGuide playbook
@@ -442,16 +388,9 @@ jobs:
 
             metadata = [ordered]@{
               name = $env:PLAYBOOK_NAME
-
-              taskNameTemplate = (
-                '${playbook_name} ' +
-                '(${playbook_datetime}) ' +
-                '${distribution_count}'
-              )
-
+              taskNameTemplate = '${playbook_name} (${playbook_datetime}) ${distribution_count}'
               labels = @()
             }
-
 
             workspace = [ordered]@{
               source = [ordered]@{
@@ -462,9 +401,7 @@ jobs:
               dependencies = @()
             }
 
-
             setup = [ordered]@{
-
               steps = @(
 
                 [ordered]@{
@@ -484,9 +421,7 @@ jobs:
               )
             }
 
-
             execution = [ordered]@{
-
               testcases = @(
 
                 [ordered]@{
@@ -497,20 +432,15 @@ jobs:
               )
             }
 
-
             teardown = [ordered]@{
-
               steps = @(
-
                 [ordered]@{
                   type = 'ecuTestStop'
                 }
               )
             }
 
-
             xilConfigRequirements = @(
-
               [ordered]@{
                 label = 'Identifier'
                 category = 'XIL'
@@ -520,27 +450,20 @@ jobs:
             )
           }
 
-
-          $json = (
-            $playbook |
+          $json = $playbook |
             ConvertTo-Json -Depth 30
-          )
-
 
           $file = Join-Path `
             $env:RUNNER_TEMP `
             'testguide-playbook.json'
-
 
           $json |
             Set-Content `
               -LiteralPath $file `
               -Encoding utf8
 
-
           "TESTGUIDE_PLAYBOOK_FILE=$file" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
 
           Write-Host ''
           Write-Host '========================================'
@@ -559,60 +482,42 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          if (
-            -not (
-              Test-Path -LiteralPath $env:TESTGUIDE_PLAYBOOK_FILE
-            )
-          ) {
+          if (-not (Test-Path -LiteralPath $env:TESTGUIDE_PLAYBOOK_FILE)) {
             throw 'Generated playbook JSON is missing.'
           }
 
-
-          $playbook = (
-            Get-Content `
-              -LiteralPath $env:TESTGUIDE_PLAYBOOK_FILE `
-              -Raw |
+          $playbook = Get-Content `
+            -LiteralPath $env:TESTGUIDE_PLAYBOOK_FILE `
+            -Raw |
             ConvertFrom-Json
-          )
-
 
           if ($playbook.setup.steps.Count -ne 2) {
             throw 'Expected exactly 2 setup steps.'
           }
 
-
           if ($playbook.execution.testcases.Count -ne 1) {
             throw 'Expected exactly 1 execution project.'
           }
-
 
           if ($playbook.xilConfigRequirements.Count -ne 1) {
             throw 'Expected exactly 1 XIL requirement.'
           }
 
-
           Write-Host 'Playbook validation successful.'
 
 
       # ==========================================================
-      # 9. UPLOAD PLAYBOOK
+      # 9. UPLOAD PLAYBOOK TO ONE.CX
       #
-      # CONFIRMED:
+      # IMPORTANT:
       #
-      # POST /playbook
+      # Earlier successful ONE.CX calls used:
       #
-      # Query:
+      # TestGuide-AuthKey: <key>
       #
-      # projectId = required
-      # folder = optional
+      # API base:
       #
-      # Response:
-      #
-      # {
-      #   "playbookId": 1,
-      #   "playbookLink": "...",
-      #   "warnings": []
-      # }
+      # /api/v2/execution
       # ==========================================================
 
       - name: Upload TestGuide playbook
@@ -630,48 +535,22 @@ jobs:
             throw 'ONECX_AUTH_KEY secret is missing.'
           }
 
-
-          $baseUrl =
-            $env:TESTGUIDE_BASE_URL.TrimEnd('/')
-
-
-          $folder =
-            [System.Uri]::EscapeDataString('/')
-
+          $folder = [System.Uri]::EscapeDataString('/')
 
           $uploadUrl = (
-            "$baseUrl/playbook" +
+            "$env:ONECX_URL/api/v2/execution/playbook" +
             "?projectId=$env:ONECX_PROJECT_ID" +
             "&folder=$folder"
           )
 
-
-          $authValue =
-            $env:ONECX_AUTH_KEY.Trim()
-
-
-          if (
-            -not $authValue.StartsWith(
-              'Bearer ',
-              [System.StringComparison]::OrdinalIgnoreCase
-            )
-          ) {
-            $authValue =
-              "Bearer $authValue"
-          }
-
-
           $headers = @{
-            Authorization = $authValue
-            Accept = 'application/json'
+            'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
+            'Accept' = 'application/json'
           }
 
-
-          $body =
-            Get-Content `
-              -LiteralPath $env:TESTGUIDE_PLAYBOOK_FILE `
-              -Raw
-
+          $body = Get-Content `
+            -LiteralPath $env:TESTGUIDE_PLAYBOOK_FILE `
+            -Raw
 
           Write-Host ''
           Write-Host '========================================'
@@ -682,17 +561,15 @@ jobs:
           Write-Host "Playbook : $env:PLAYBOOK_NAME"
           Write-Host '========================================'
 
-
           try {
 
-            $response =
-              Invoke-RestMethod `
-                -Method POST `
-                -Uri $uploadUrl `
-                -Headers $headers `
-                -ContentType 'application/json' `
-                -Body $body `
-                -ErrorAction Stop
+            $response = Invoke-RestMethod `
+              -Method POST `
+              -Uri $uploadUrl `
+              -Headers $headers `
+              -ContentType 'application/json' `
+              -Body $body `
+              -ErrorAction Stop
 
           }
           catch {
@@ -702,59 +579,52 @@ jobs:
             Write-Host 'PLAYBOOK UPLOAD FAILED'
             Write-Host '========================================'
             Write-Host "URL: $uploadUrl"
-            Write-Host ''
-
-            Write-Host 'Exception:'
-            Write-Host $_.Exception.Message
-
+            Write-Host "Exception: $($_.Exception.Message)"
 
             if ($null -ne $_.Exception.Response) {
-
-              Write-Host ''
-              Write-Host 'HTTP Status:'
-
               try {
-                Write-Host ([int]$_.Exception.Response.StatusCode)
-                Write-Host $_.Exception.Response.StatusCode
+                Write-Host "HTTP Status: $([int]$_.Exception.Response.StatusCode)"
               }
               catch {
-                Write-Host 'Unable to read HTTP status.'
+                Write-Host 'HTTP status unavailable.'
               }
             }
 
-
             if ($null -ne $_.ErrorDetails) {
-
-              Write-Host ''
-              Write-Host 'Response body:'
-              Write-Host $_.ErrorDetails.Message
-
+              Write-Host "Response body: $($_.ErrorDetails.Message)"
             }
-
 
             Write-Host '========================================'
 
             throw
           }
 
-
           if ($null -eq $response) {
-            throw 'TestGuide returned an empty upload response.'
+            throw 'ONE.CX returned an empty upload response.'
           }
 
+          Write-Host ''
+          Write-Host 'Upload response:'
 
-          $playbookId =
-            [System.String]$response.playbookId
+          $response |
+            ConvertTo-Json -Depth 20 |
+            Write-Host
 
+          $playbookId = [System.String]$response.playbookId
 
           if (
             [System.String]::IsNullOrWhiteSpace(
               $playbookId
             )
           ) {
-            throw 'TestGuide upload did not return playbookId.'
+            throw 'ONE.CX upload did not return playbookId.'
           }
 
+          "TESTGUIDE_PLAYBOOK_ID=$playbookId" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          "TESTGUIDE_PLAYBOOK_LINK=$($response.playbookLink)" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
           Write-Host ''
           Write-Host '========================================'
@@ -762,36 +632,11 @@ jobs:
           Write-Host '========================================'
           Write-Host "Playbook ID   : $playbookId"
           Write-Host "Playbook Link : $($response.playbookLink)"
-
-
-          if ($null -ne $response.warnings) {
-
-            foreach ($warning in $response.warnings) {
-
-              Write-Warning $warning
-
-            }
-          }
-
-
-          "TESTGUIDE_PLAYBOOK_ID=$playbookId" |
-            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-
-          "TESTGUIDE_PLAYBOOK_LINK=$($response.playbookLink)" |
-            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host '========================================'
 
 
       # ==========================================================
-      # 10. EXECUTE THE UPLOADED PLAYBOOK
-      #
-      # CONFIRMED ENDPOINT:
-      #
-      # POST /playbook/{playbookId}/execute
-      #
-      # Required:
-      #
-      # projectId query parameter
+      # 10. EXECUTE PLAYBOOK
       # ==========================================================
 
       - name: Execute TestGuide playbook
@@ -801,7 +646,6 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-
           if (
             [System.String]::IsNullOrWhiteSpace(
               $env:TESTGUIDE_PLAYBOOK_ID
@@ -810,128 +654,64 @@ jobs:
             throw 'TESTGUIDE_PLAYBOOK_ID is missing.'
           }
 
-
-          $baseUrl =
-            $env:TESTGUIDE_BASE_URL.TrimEnd('/')
-
-
           $executeUrl = (
-            "$baseUrl/playbook/" +
+            "$env:ONECX_URL/api/v2/execution/playbook/" +
             "$env:TESTGUIDE_PLAYBOOK_ID/execute" +
             "?projectId=$env:ONECX_PROJECT_ID" +
-            "&checkLastExecution=true"
+            "&checkLastExecution=false"
           )
 
-
-          $authValue =
-            $env:ONECX_AUTH_KEY.Trim()
-
-
-          if (
-            -not $authValue.StartsWith(
-              'Bearer ',
-              [System.StringComparison]::OrdinalIgnoreCase
-            )
-          ) {
-            $authValue =
-              "Bearer $authValue"
-          }
-
-
           $headers = @{
-            Authorization = $authValue
-            Accept = 'application/json'
+            'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
+            'Accept' = 'application/json'
           }
-
 
           $jiraUrl = (
             'https://scoutmotors.atlassian.net/browse/' +
             $env:JIRA_KEY
           )
 
-
           $executeRequest = [ordered]@{
-
-            name = (
-              '${playbook_name} ' +
-              '(${playbook_datetime}) ' +
-              '${distribution_count}'
-            )
+            name = "$env:JIRA_KEY - $env:TARGET_ECU L2 Quality Gate"
 
             priority = 42
 
-            parameters = @(
-
-              [ordered]@{
-                label = 'JiraKey'
-                value = $env:JIRA_KEY
-              },
-
-              [ordered]@{
-                label = 'BenchId'
-                value = $env:BENCH_ID
-              },
-
-              [ordered]@{
-                label = 'TargetEcu'
-                value = $env:TARGET_ECU
-              },
-
-              [ordered]@{
-                label = 'TestCaseIds'
-                value = $env:NORMALIZED_TEST_CASES
-              }
-            )
+            parameters = @()
 
             additionalSettings = [ordered]@{
+              analysisExecutionMode = 'sequential'
+              downstreamAnalysisPartitioning = 'analysis'
+              expirationTimeInMinutes = 60
 
-              analysisExecutionMode =
-                'sequential'
+              issueTrackerTickets = @(
+                $jiraUrl
+              )
 
-              downstreamAnalysisPartitioning =
-                'analysis'
-
-              expirationTimeInMinutes =
-                60
-
-              issueTrackerTickets =
-                @($jiraUrl)
-
-              remainingRetriesOnError =
-                0
+              remainingRetriesOnError = 0
             }
           }
 
-
-          $executeJson = (
-            $executeRequest |
-            ConvertTo-Json -Depth 30
-          )
-
+          $executeJson = $executeRequest |
+            ConvertTo-Json -Depth 20
 
           Write-Host ''
           Write-Host '========================================'
-          Write-Host 'EXECUTE TESTGUIDE PLAYBOOK'
+          Write-Host 'EXECUTE PLAYBOOK'
           Write-Host '========================================'
           Write-Host "URL         : $executeUrl"
           Write-Host "Playbook ID : $env:TESTGUIDE_PLAYBOOK_ID"
           Write-Host "Project ID  : $env:ONECX_PROJECT_ID"
-          Write-Host "Bench       : $env:BENCH_ID"
-          Write-Host "ECU         : $env:TARGET_ECU"
-          Write-Host "Test Cases  : $env:NORMALIZED_TEST_CASES"
           Write-Host '========================================'
-
 
           try {
 
-            $response =
-              Invoke-RestMethod `
-                -Method POST `
-                -Uri $executeUrl `
-                -Headers $headers `
-                -ContentType 'application/json' `
-                -Body $executeJson `
-                -ErrorAction Stop
+            $response = Invoke-RestMethod `
+              -Method POST `
+              -Uri $executeUrl `
+              -Headers $headers `
+              -ContentType 'application/json' `
+              -Body $executeJson `
+              -ErrorAction Stop
 
           }
           catch {
@@ -941,71 +721,146 @@ jobs:
             Write-Host 'PLAYBOOK EXECUTION FAILED'
             Write-Host '========================================'
             Write-Host "URL: $executeUrl"
-            Write-Host ''
-
-            Write-Host 'Exception:'
-            Write-Host $_.Exception.Message
-
+            Write-Host "Exception: $($_.Exception.Message)"
 
             if ($null -ne $_.Exception.Response) {
-
-              Write-Host ''
-              Write-Host 'HTTP Status:'
-
               try {
-                Write-Host ([int]$_.Exception.Response.StatusCode)
-                Write-Host $_.Exception.Response.StatusCode
+                Write-Host "HTTP Status: $([int]$_.Exception.Response.StatusCode)"
               }
               catch {
-                Write-Host 'Unable to read HTTP status.'
+                Write-Host 'HTTP status unavailable.'
               }
             }
 
-
             if ($null -ne $_.ErrorDetails) {
-
-              Write-Host ''
-              Write-Host 'Response body:'
-              Write-Host $_.ErrorDetails.Message
-
+              Write-Host "Response body: $($_.ErrorDetails.Message)"
             }
-
 
             Write-Host '========================================'
 
             throw
           }
 
-
           Write-Host ''
           Write-Host '========================================'
           Write-Host 'EXECUTION RESPONSE'
           Write-Host '========================================'
 
+          $response |
+            ConvertTo-Json -Depth 30 |
+            Write-Host
 
-          if ($null -eq $response) {
+          $taskIds = @($response.taskIds)
 
-            Write-Host 'Execute request accepted.'
-            Write-Host 'No response body returned.'
+          if ($taskIds.Count -gt 0) {
+
+            $taskId = [System.String]$taskIds[0]
+
+            "TESTGUIDE_TASK_ID=$taskId" |
+              Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+            Write-Host ''
+            Write-Host "Task ID: $taskId"
 
           }
           else {
 
-            $response |
-              ConvertTo-Json -Depth 30 |
-              Write-Host
+            Write-Warning 'Execution response did not contain taskIds.'
 
           }
 
-
-          Write-Host ''
           Write-Host '========================================'
           Write-Host 'TESTGUIDE EXECUTION SUBMITTED'
           Write-Host '========================================'
 
 
       # ==========================================================
-      # 11. SUMMARY
+      # 11. POLL TASK FIVE TIMES
+      # ==========================================================
+
+      - name: Poll TestGuide task
+        if: env.TESTGUIDE_TASK_ID != ''
+        shell: pwsh
+        env:
+          ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $taskUrl = (
+            "$env:ONECX_URL/api/v2/execution/task/" +
+            "$env:TESTGUIDE_TASK_ID" +
+            "?projectId=$env:ONECX_PROJECT_ID"
+          )
+
+          $headers = @{
+            'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
+            'Accept' = 'application/json'
+          }
+
+          Write-Host ''
+          Write-Host "Task ID  : $env:TESTGUIDE_TASK_ID"
+          Write-Host "Task URL : $taskUrl"
+
+          for ($attempt = 1; $attempt -le 5; $attempt++) {
+
+            $task = Invoke-RestMethod `
+              -Method GET `
+              -Uri $taskUrl `
+              -Headers $headers `
+              -ErrorAction Stop
+
+            $state = [System.String]$task.state
+
+            Write-Host "Attempt ${attempt}/5: $state"
+
+            "FINAL_TASK_STATE=$state" |
+              Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+            if (
+              $state -in @(
+                'FINISHED',
+                'COMPLETED',
+                'SUCCESS',
+                'SUCCEEDED'
+              )
+            ) {
+
+              Write-Host 'TestGuide execution completed successfully.'
+              exit 0
+
+            }
+
+            if (
+              $state -in @(
+                'ERROR',
+                'FAILED',
+                'ABORTED',
+                'CANCELLED',
+                'CANCELED'
+              )
+            ) {
+
+              Write-Host ''
+              Write-Host 'TestGuide execution failed.'
+
+              $task |
+                ConvertTo-Json -Depth 30 |
+                Write-Host
+
+              exit 1
+            }
+
+            if ($attempt -lt 5) {
+              Start-Sleep -Seconds 10
+            }
+          }
+
+          Write-Host ''
+          Write-Host "Task remains non-terminal after 5 attempts."
+
+
+      # ==========================================================
+      # 12. SUMMARY
       # ==========================================================
 
       - name: Publish execution summary
@@ -1026,6 +881,8 @@ jobs:
             "| Playbook | $env:PLAYBOOK_NAME |",
             "| Playbook ID | $env:TESTGUIDE_PLAYBOOK_ID |",
             "| Playbook Link | $env:TESTGUIDE_PLAYBOOK_LINK |",
+            "| Task ID | $env:TESTGUIDE_TASK_ID |",
+            "| Task State | $env:FINAL_TASK_STATE |",
             "| Workspace | $env:TESTGUIDE_ROOT |",
             "| TBC | $env:TBC_RELATIVE_PATH |",
             "| TCF | $env:TCF_RELATIVE_PATH |",
@@ -1033,7 +890,6 @@ jobs:
             "| XIL | $env:XIL_IDENTIFIER |",
             "| Status | ${{ job.status }} |"
           )
-
 
           $summary |
             Out-File `
