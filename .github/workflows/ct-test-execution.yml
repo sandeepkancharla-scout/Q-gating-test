@@ -20,7 +20,7 @@ jobs:
 
     env:
       # ==========================================================
-      # EXECUTION INPUTS FROM JIRA
+      # INPUTS FROM JIRA
       # ==========================================================
 
       JIRA_KEY: ${{ github.event.client_payload.jira_key }}
@@ -31,19 +31,16 @@ jobs:
       PLAYBOOK: ${{ github.event.client_payload.playbook_name }}
 
       # ==========================================================
-      # STATIC INFRASTRUCTURE PATHS
+      # STATIC PATH CONFIGURATION
       # ==========================================================
 
-      # Repository location on the GitHub self-hosted runner.
       LOCAL_ROOT: 'C:\HIL\Testing\eeint-Test-Automation'
-
-      # Equivalent path visible to TestGuide.
       TESTGUIDE_ROOT: 'D:\HIL\Testing\eeint-Test-Automation'
 
     steps:
+
       # ==========================================================
-      # PHASE 1
-      # VALIDATE JIRA INPUTS
+      # 1. VALIDATE JIRA PAYLOAD
       # ==========================================================
 
       - name: Validate Jira execution request
@@ -73,17 +70,22 @@ jobs:
           }
 
           foreach ($item in $required.GetEnumerator()) {
-              if ([string]::IsNullOrWhiteSpace([string]$item.Value)) {
+
+              if ([string]::IsNullOrWhiteSpace(
+                  [string]$item.Value
+              )) {
+
                   throw "Required Jira input '$($item.Key)' is missing."
+
               }
           }
 
           Write-Host ""
           Write-Host "Jira payload validation successful."
 
+
       # ==========================================================
-      # PHASE 2
-      # VALIDATE SELF-HOSTED RUNNER
+      # 2. VALIDATE RUNNER
       # ==========================================================
 
       - name: Validate self-hosted runner
@@ -100,12 +102,13 @@ jobs:
           hostname
 
           Write-Host ""
+
           Write-Host "PowerShell:"
           Write-Host $PSVersionTable.PSVersion
 
           Write-Host ""
-          Write-Host "Git:"
 
+          Write-Host "Git:"
           git --version
 
           if ($LASTEXITCODE -ne 0) {
@@ -113,16 +116,18 @@ jobs:
           }
 
           Write-Host ""
-          Write-Host "Local repository root:"
+
+          Write-Host "Local repository:"
           Write-Host "$env:LOCAL_ROOT"
 
           Write-Host ""
-          Write-Host "TestGuide repository root:"
+
+          Write-Host "TestGuide root:"
           Write-Host "$env:TESTGUIDE_ROOT"
 
+
       # ==========================================================
-      # PHASE 3
-      # CLONE OR UPDATE COMPLETE REPOSITORY
+      # 3. CLONE / UPDATE AUTOMATION REPOSITORY
       # ==========================================================
 
       - name: Checkout complete automation repository
@@ -140,30 +145,52 @@ jobs:
           Write-Host "============================================"
           Write-Host "PREPARE AUTOMATION REPOSITORY"
           Write-Host "============================================"
-          Write-Host "Repository path:"
+          Write-Host "Repository:"
           Write-Host "$repoPath"
+          Write-Host ""
 
-          # Repository does not exist.
+          # ------------------------------------------------------
+          # CLONE IF MISSING
+          # ------------------------------------------------------
+
           if (-not (Test-Path "$repoPath\.git")) {
-              Write-Host ""
-              Write-Host "Local Git repository is missing."
+
+              Write-Host "Repository is not currently cloned."
 
               if ([string]::IsNullOrWhiteSpace($repoUrl)) {
-                  throw "AUTOMATION_REPO_URL GitHub Actions secret is missing."
+
+                  throw @"
+          AUTOMATION_REPO_URL secret is missing.
+
+          Configure the clone URL under:
+
+          Repository
+          -> Settings
+          -> Secrets and variables
+          -> Actions
+          -> AUTOMATION_REPO_URL
+          "@
               }
 
               $parent = Split-Path $repoPath -Parent
 
               if (-not (Test-Path $parent)) {
-                  Write-Host "Creating parent directory: $parent"
+
+                  Write-Host ""
+                  Write-Host "Creating:"
+                  Write-Host "$parent"
 
                   New-Item `
                       -ItemType Directory `
                       -Path $parent `
-                      -Force | Out-Null
+                      -Force |
+                  Out-Null
               }
 
+              # Do not overwrite an existing non-Git directory.
+
               if (Test-Path $repoPath) {
+
                   $existingItems = @(
                       Get-ChildItem `
                           -Path $repoPath `
@@ -172,6 +199,7 @@ jobs:
                   )
 
                   if ($existingItems.Count -gt 0) {
+
                       Write-Host ""
                       Write-Host "Existing contents:"
 
@@ -180,18 +208,17 @@ jobs:
                       }
 
                       throw @"
-          Repository destination exists but is not an empty Git repository.
+          Target directory exists but is not a Git repository.
 
-          Path:
           $repoPath
 
-          Refusing to delete or overwrite the existing files.
+          Existing files will NOT be deleted automatically.
           "@
                   }
               }
 
               Write-Host ""
-              Write-Host "Cloning main branch and recursive submodules..."
+              Write-Host "Cloning repository including submodules..."
 
               git clone `
                   --branch $branch `
@@ -200,19 +227,34 @@ jobs:
                   $repoPath
 
               if ($LASTEXITCODE -ne 0) {
+
                   throw "Repository clone failed."
+
               }
           }
-          else {
-              Write-Host ""
-              Write-Host "Existing Git repository found."
-              Write-Host "Updating to latest origin/$branch..."
 
-              git -C $repoPath fetch --prune origin $branch
+          # ------------------------------------------------------
+          # UPDATE IF ALREADY PRESENT
+          # ------------------------------------------------------
+
+          else {
+
+              Write-Host "Existing repository found."
+
+              Write-Host ""
+              Write-Host "Fetching origin/$branch..."
+
+              git -C $repoPath fetch `
+                  --prune `
+                  origin `
+                  $branch
 
               if ($LASTEXITCODE -ne 0) {
                   throw "git fetch failed."
               }
+
+              Write-Host ""
+              Write-Host "Checking out $branch..."
 
               git -C $repoPath checkout $branch
 
@@ -220,15 +262,26 @@ jobs:
                   throw "git checkout $branch failed."
               }
 
-              git -C $repoPath reset --hard "origin/$branch"
+              Write-Host ""
+              Write-Host "Resetting to latest origin/$branch..."
+
+              git -C $repoPath reset `
+                  --hard `
+                  "origin/$branch"
 
               if ($LASTEXITCODE -ne 0) {
-                  throw "git reset to origin/$branch failed."
+                  throw "git reset failed."
               }
           }
 
+          # ------------------------------------------------------
+          # SUBMODULES
+          # ------------------------------------------------------
+
           Write-Host ""
-          Write-Host "Synchronizing submodules..."
+          Write-Host "============================================"
+          Write-Host "SUBMODULE SYNCHRONIZATION"
+          Write-Host "============================================"
 
           git -C $repoPath submodule sync --recursive
 
@@ -237,7 +290,7 @@ jobs:
           }
 
           Write-Host ""
-          Write-Host "Initializing and updating recursive submodules..."
+          Write-Host "Initializing/updating submodules..."
 
           git -C $repoPath submodule update `
               --init `
@@ -260,25 +313,27 @@ jobs:
 
           Write-Host ""
           Write-Host ""
+
           Write-Host "============================================"
           Write-Host "SUBMODULE STATUS"
           Write-Host "============================================"
 
           git -C $repoPath submodule status --recursive
 
+
       # ==========================================================
-      # PHASE 4
-      # VERIFY PROJECT FILES
+      # 4. VERIFY PRJ FILES EXIST
       # ==========================================================
 
       - name: Verify project files
         shell: pwsh
-        ErrorActionPreference = "Stop"
+        run: |
+          $ErrorActionPreference = "Stop"
 
           $root = $env:LOCAL_ROOT
 
           if (-not (Test-Path $root)) {
-              throw "Local repository does not exist: $root"
+              throw "Repository does not exist: $root"
           }
 
           Write-Host ""
@@ -295,25 +350,28 @@ jobs:
                   -ErrorAction SilentlyContinue
           )
 
-          Write-Host "PRJ count: $($projects.Count)"
+          Write-Host "PRJ files found: $($projects.Count)"
           Write-Host ""
 
           foreach ($project in $projects) {
+
               Write-Host "  $($project.FullName)"
+
           }
 
           if ($projects.Count -eq 0) {
-              throw @"
-          Repository and submodules are present, but no .prj files were found.
 
-          Repository:
+              throw @"
+          Repository and submodules were populated successfully,
+          but no .prj files were found under:
+
           $root
           "@
           }
 
+
       # ==========================================================
-      # PHASE 5
-      # NORMALIZE JIRA TEST CASE IDS
+      # 5. NORMALIZE JIRA TEST CASES
       # ==========================================================
 
       - name: Parse Jira Test Cases
@@ -324,15 +382,21 @@ jobs:
           $testCases = @(
               $env:TEST_CASES -split '[,;]' |
               ForEach-Object {
+
                   $_.Trim()
+
               } |
               Where-Object {
-                  -not :IsNullOrWhiteSpace($_)
+
+                  -not [string]::IsNullOrWhiteSpace($_)
+
               }
           )
 
           if ($testCases.Count -eq 0) {
+
               throw "No valid Test Case IDs were received from Jira."
+
           }
 
           $normalizedTestCases = $testCases -join ","
@@ -343,16 +407,19 @@ jobs:
           Write-Host "============================================"
 
           foreach ($testCase in $testCases) {
+
               Write-Host "TC: $testCase"
+
           }
 
           Write-Host "============================================"
 
-          "NORMALIZED_TEST_CASES=$normalizedTestCases" >> $env:GITHUB_ENV
+          "NORMALIZED_TEST_CASES=$normalizedTestCases" >>
+              $env:GITHUB_ENV
+
 
       # ==========================================================
-      # PHASE 6
-      # RESOLVE PRJ USING JIRA BENCH NAME
+      # 6. FIND PRJ USING BENCH_NAME
       # ==========================================================
 
       - name: Resolve PRJ from Bench Name
@@ -367,11 +434,15 @@ jobs:
           Write-Host "============================================"
           Write-Host "PROJECT RESOLUTION"
           Write-Host "============================================"
+
           Write-Host "Repository:"
           Write-Host "$root"
+
           Write-Host ""
-          Write-Host "Jira Bench Name:"
+
+          Write-Host "Bench Name:"
           Write-Host "$benchName"
+
           Write-Host ""
 
           $projects = @(
@@ -384,42 +455,61 @@ jobs:
           )
 
           if ($projects.Count -eq 0) {
+
               throw "No .prj files were found under $root"
+
           }
+
+          # ------------------------------------------------------
+          # Find projects whose path contains bench_name.
+          # Comparison is case insensitive.
+          # ------------------------------------------------------
 
           $matches = @(
               $projects |
               Where-Object {
+
                   $_.FullName.IndexOf(
                       $benchName,
                       [System.StringComparison]::OrdinalIgnoreCase
                   ) -ge 0
+
               }
           )
 
           if ($matches.Count -eq 0) {
+
               Write-Host ""
               Write-Host "Available PRJ files:"
 
               foreach ($project in $projects) {
+
                   Write-Host "  $($project.FullName)"
+
               }
 
-              throw "No PRJ file matched bench_name '$benchName'."
+              throw @"
+          No PRJ matched Jira bench_name:
+
+          $benchName
+          "@
           }
 
           if ($matches.Count -gt 1) {
+
               Write-Host ""
-              Write-Host "Multiple PRJ files matched bench '$benchName':"
+              Write-Host "Multiple projects matched:"
 
               foreach ($match in $matches) {
+
                   Write-Host "  $($match.FullName)"
+
               }
 
               throw @"
           Multiple PRJ files matched bench '$benchName'.
 
-          Refusing to guess which project should execute.
+          Refusing to choose a project automatically.
           "@
           }
 
@@ -429,14 +519,17 @@ jobs:
           Write-Host "============================================"
           Write-Host "LOCAL PRJ FOUND"
           Write-Host "============================================"
+
           Write-Host "$($selectedProject.FullName)"
+
           Write-Host "============================================"
 
-          "LOCAL_PROJECT_PATH=$($selectedProject.FullName)" >> $env:GITHUB_ENV
+          "LOCAL_PROJECT_PATH=$($selectedProject.FullName)" >>
+              $env:GITHUB_ENV
+
 
       # ==========================================================
-      # PHASE 7
-      # MAP C:\ PATH TO D:\ TESTGUIDE PATH
+      # 7. MAP LOCAL C: PATH TO TESTGUIDE D: PATH
       # ==========================================================
 
       - name: Create TestGuide PRJ Path
@@ -444,55 +537,87 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          $localRoot     = $env:LOCAL_ROOT
-          $testGuideRoot = $env:TESTGUIDE_ROOT
-          $localProject  = $env:LOCAL_PROJECT_PATH
+          $localRoot =
+              [System.IO.Path]::GetFullPath($env:LOCAL_ROOT)
+
+          $testGuideRoot =
+              [System.IO.Path]::GetFullPath($env:TESTGUIDE_ROOT)
+
+          $localProject =
+              [System.IO.Path]::GetFullPath($env:LOCAL_PROJECT_PATH)
 
           if (-not (Test-Path $localProject)) {
+
               throw "Resolved local PRJ does not exist: $localProject"
+
           }
 
-          $relativePath = [System.IO.Path]::GetRelativePath(
-              $localRoot,
-              $localProject
-          )
+          # ------------------------------------------------------
+          # Get path relative to C:\ repository root.
+          # ---------------------------
+
+          $relativePath =
+              [System.IO.Path]::GetRelativePath(
+                  $localRoot,
+                  $localProject
+              )
+
+          # Safety check.
 
           if (
               $relativePath.StartsWith("..") -or
               [System.IO.Path]::IsPathRooted($relativePath)
           ) {
-              throw "Resolved PRJ is outside the configured local repository root."
+
+              throw "Resolved PRJ is outside LOCAL_ROOT."
+
           }
 
-          $testGuideProjectPath = Join-Path `
-              $testGuideRoot `
-              $relativePath
+          # ------------------------------------------------------
+          # Recreate identical hierarchy below D:\ root.
+          # ------------------------------------------------------
+
+          $testGuideProjectPath =
+              Join-Path `
+                  $testGuideRoot `
+                  $relativePath
 
           Write-Host ""
           Write-Host "============================================"
           Write-Host "PROJECT PATH MAPPING"
           Write-Host "============================================"
+
           Write-Host ""
-          Write-Host "LOCAL PRJ:"
+          Write-Host "LOCAL:"
           Write-Host "$localProject"
+
           Write-Host ""
-          Write-Host "RELATIVE PATH:"
+          Write-Host "RELATIVE:"
           Write-Host "$relativePath"
+
           Write-Host ""
-          Write-Host "TESTGUIDE PRJ:"
+          Write-Host "TESTGUIDE:"
           Write-Host "$testGuideProjectPath"
+
           Write-Host ""
           Write-Host "============================================"
 
-          "PROJECT_RELATIVE_PATH=$relativePath" >> $env:GITHUB_ENV
-          "TESTGUIDE_PROJECT_PATH=$testGuideProjectPath" >> $env:GITHUB_ENV
+          "PROJECT_RELATIVE_PATH=$relativePath" >>
+              $env:GITHUB_ENV
+
+          "TESTGUIDE_PROJECT_PATH=$testGuideProjectPath" >>
+              $env:GITHUB_ENV
+
 
       # ==========================================================
-      # PHASE 8
-      # PREPARE TASK-BASED TESTGUIDE REQUEST
+      # 8. BUILD TESTGUIDE TASK REQUEST
+      #
+      # IMPORTANT:
+      # This body is a placeholder until the actual TestGuide
+      # task API schema is confirmed.
       # ==========================================================
 
-      - name: Prepare TestGuide Task Request
+      - name: Prepare TestGuide Task
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -500,19 +625,16 @@ jobs:
           $testCaseIds = @(
               $env:NORMALIZED_TEST_CASES -split "," |
               ForEach-Object {
+
                   $_.Trim()
+
               } |
               Where-Object {
+
                   -not :IsNullOrWhiteSpace($_)
+
               }
           )
-
-          # ------------------------------------------------------
-          # TASK REQUEST PLACEHOLDER
-          #
-          # Replace the property names only after confirming the
-          # actual TestGuide task API schema.
-          # ------------------------------------------------------
 
           $taskRequest = @{
               externalId = $env:JIRA_KEY
@@ -523,17 +645,25 @@ jobs:
               }
 
               playbookName = $env:PLAYBOOK
-              projectPath  = $env:TESTGUIDE_PROJECT_PATH
-              targetEcu    = $env:TARGET_ECU
-              testCaseIds  = $testCaseIds
+
+              projectPath =
+                  $env:TESTGUIDE_PROJECT_PATH
+
+              targetEcu =
+                  $env:TARGET_ECU
+
+              testCaseIds =
+                  $testCaseIds
           }
 
-          $taskJson = $taskRequest |
+          $taskJson =
+              $taskRequest |
               ConvertTo-Json -Depth 20
 
-          $taskFile = Join-Path `
-              $env:RUNNER_TEMP `
-              "testguide-task-request.json"
+          $taskFile =
+              Join-Path `
+                  $env:RUNNER_TEMP `
+                  "testguide-task-request.json"
 
           $taskJson |
               Set-Content `
@@ -542,22 +672,92 @@ jobs:
 
           Write-Host ""
           Write-Host "============================================"
-          Write-Host "TESTGUIDE TASK REQUEST PLACEHOLDER"
+          Write-Host "TESTGUIDE TASK"
           Write-Host "============================================"
+
           Write-Host $taskJson
+
           Write-Host "============================================"
 
-          "TESTGUIDE_TASK_FILE=$taskFile" >> $env:GITHUB_ENV
+          "TESTGUIDE_TASK_FILE=$taskFile" >>
+              $env:GITHUB_ENV
+
 
       # ==========================================================
-      # PHASE 9
-      # SUBMIT TASK AND RUN PLAYBOOK
+      # 9. FINAL EXECUTION CONTEXT
+      # ==========================================================
+
+      - name: Show final TestGuide execution
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host ""
+          Write-Host "============================================"
+          Write-Host "TESTGUIDE EXECUTION READY"
+          Write-Host "============================================"
+
+          Write-Host "Jira:"
+          Write-Host "  $env:JIRA_KEY"
+
+          Write-Host ""
+
+          Write-Host "Bench:"
+          Write-Host "  $env:BENCH_ID"
+
+          Write-Host ""
+
+          Write-Host "Bench Name:"
+          Write-Host "  $env:BENCH_NAME"
+
+          Write-Host ""
+
+          Write-Host "Playbook:"
+          Write-Host "  $env:PLAYBOOK"
+
+          Write-Host ""
+
+          Write-Host "Target ECU:"
+          Write-Host "  $env:TARGET_ECU"
+
+          Write-Host ""
+
+          Write-Host "Test Cases:"
+          Write-Host "  $env:NORMALIZED_TEST_CASES"
+
+          Write-Host ""
+
+          Write-Host "Local PRJ:"
+          Write-Host "  $env:LOCAL_PROJECT_PATH"
+
+          Write-Host ""
+
+          Write-Host "TestGuide PRJ:"
+          Write-Host "  $env:TESTGUIDE_PROJECT_PATH"
+
+          Write-Host ""
+
+          Write-Host "Task file:"
+          Write-Host "  $env:TESTGUIDE_TASK_FILE"
+
+          Write-Host ""
+          Write-Host "============================================"
+
+
+      # ==========================================================
+      # 10. TESTGUIDE TASK / PLAYBOOK EXECUTION PLACEHOLDER
       #
-      # This is intentionally a placeholder until the real
-      # TestGuide task endpoint and schema are verified.
+      # Replace this step after confirming:
+      #
+      #   1. TestGuide task POST endpoint
+      #   2. Request body schema
+      #   3. Authentication
+      #   4. Task ID response field
+      #
+      # Nothing above this step needs to change.
       # ==========================================================
 
-      - name: Submit TestGuide Task and Run Playbook
+      - name: TestGuide Task Execution Placeholder
         shell: pwsh
         env:
           TESTGUIDE_TASK_URL: ${{ secrets.TESTGUIDE_TASK_URL }}
@@ -567,79 +767,85 @@ jobs:
 
           Write-Host ""
           Write-Host "============================================"
-          Write-Host "TESTGUIDE TASK SUBMISSION"
-          Write-Host "============================================"
-          Write-Host "Jira     : $env:JIRA_KEY"
-          Write-Host "Bench    : $env:BENCH_ID"
-          Write-Host "Playbook : $env:PLAYBOOK"
-          Write-Host "Project  : $env:TESTGUIDE_PROJECT_PATH"
-          Write-Host "ECU      : $env:TARGET_ECU"
-          Write-Host "TCs      : $env:NORMALIZED_TEST_CASES"
+          Write-Host "TESTGUIDE TASK EXECUTION PLACEHOLDER"
           Write-Host "============================================"
 
-          if (:IsNullOrWhiteSpace($env:TESTGUIDE_TASK_URL)) {
-              throw @"
-          TESTGUIDE_TASK_URL is not configured.
+          Write-Host "Playbook:"
+          Write-Host "$env:PLAYBOOK"
 
-          The repository, submodules, PRJ resolution and C-to-D path
-          mapping succeeded.
+          Write-Host ""
 
-          Configure the verified TestGuide task endpoint as the
-          TESTGUIDE_TASK_URL GitHub Actions secret.
+          Write-Host "Project:"
+          Write-Host "$env:TESTGUIDE_PROJECT_PATH"
+
+          Write-Host ""
+
+          Write-Host "ECU:"
+          Write-Host "$env:TARGET_ECU"
+
+          Write-Host ""
+
+          Write-Host "Test Cases:"
+          Write-Host "$env:NORMALIZED_TEST_CASES"
+
+          Write-Host ""
+
+          if (:IsNullOrWhiteSpace(
+              $env:TESTGUIDE_TASK_URL
+          )) {
+
+              Write-Warning @"
+          TESTGUIDE_TASK_URL has not been configured yet.
+
+          All preparation phases completed successfully.
+
+          The actual TestGuide POST request will be added here once
+          the verified task/playbook endpoint is available.
           "@
+
+              exit 0
           }
 
-          if (:IsNullOrWhiteSpace($env:TESTGUIDE_API_TOKEN)) {
-              throw "TESTGUIDE_API_TOKEN GitHub Actions secret is missing."
+          if (:IsNullOrWhiteSpace(
+              $env:TESTGUIDE_API_TOKEN
+          )) {
+
+              throw "TESTGUIDE_API_TOKEN secret is missing."
+
           }
 
           if (-not (Test-Path $env:TESTGUIDE_TASK_FILE)) {
-              throw "TestGuide task request file is missing."
+
+              throw "TestGuide task JSON file does not exist."
+
           }
 
           # ------------------------------------------------------
-          # PLACEHOLDER AUTHENTICATION
+          # PREPARED AUTHENTICATION
           #
-          # Keep this only if the verified TestGuide API uses a
-          # Bearer token.
+          # Enable only if the TestGuide API confirms Bearer auth.
           # ------------------------------------------------------
 
           $headers = @{
-              Authorization = "Bearer $env:TESTGUIDE_API_TOKEN"
-              Accept        = "application/json"
+              Authorization =
+                  "Bearer $env:TESTGUIDE_API_TOKEN"
+
+              Accept =
+                  "application/json"
           }
 
-          $requestBody = Get-Content `
-              -Path $env:TESTGUIDE_TASK_FILE `
-              -Raw
+          $requestBody =
+              Get-Content `
+                  -Path $env:TESTGUIDE_TASK_FILE `
+                  -Raw
 
-          # ------------------------------------------------------
-          # TASK EXECUTION PLACEHOLDER
+          Write-Host ""
+          Write-Host "Task JSON prepared and ready."
+
+          # ======================================================
+          # DO NOT ENABLE UNTIL ENDPOINT + BODY ARE VERIFIED
+          # ======================================================
           #
-          # This POST is disabled until the real endpoint and
-          # request schema are confirmed.
-          #
-          # When confirmed, remove the throw below and uncomment
-          # the Invoke-RestMethod block.
-          # ------------------------------------------------------
-
-          throw @"
-          TestGuide task execution placeholder reached successfully.
-
-          Task URL:
-          $env:TESTGUIDE_TASK_URL
-
-          Playbook:
-          $env:PLAYBOOK
-
-          Project:
-          $env:TESTGUIDE_PROJECT_PATH
-
-          Replace the placeholder body/schema with the verified
-          TestGuide task API schema, remove this throw statement,
-          and enable the Invoke-RestMethod block.
-          "@
-
           # $response = Invoke-RestMethod `
           #     -Method POST `
           #     -Uri $env:TESTGUIDE_TASK_URL `
@@ -647,24 +853,37 @@ jobs:
           #     -ContentType "application/json" `
           #     -Body $requestBody
           #
+          # if ($null -eq $response) {
+          #
+          #     throw "TestGuide returned an empty response."
+          #
+          # }
+          #
           # Write-Host ""
-          # Write-Host "TestGuide task response:"
+          # Write-Host "TestGuide response:"
           #
           # $response |
           #     ConvertTo-Json -Depth 20 |
           #     Write-Host
           #
-          # if ($null -eq $response) {
-          #     throw "TestGuide returned an empty task response."
-          # }
-          #
           # $taskId = $response.taskId
           #
-          # if (:IsNullOrWhiteSpace([string]$taskId)) {
+          # if (:IsNullOrWhiteSpace(
+          #     [string]$taskId
+          # )) {
+          #
           #     throw "TestGuide response did not contain taskId."
+          #
           # }
           #
           # Write-Host ""
-          # Write-Host "TestGuide task created: $taskId"
+          # Write-Host "Task created:"
+          # Write-Host "$taskId"
           #
-          # "TESTGUIDE_TASK_ID=$taskId" >> $env:GITHUB_ENV
+          # "TESTGUIDE_TASK_ID=$taskId" >>
+          #     $env:GITHUB_ENV
+
+          Write-Host ""
+          Write-Host "============================================"
+          Write-Host "PREPARATION COMPLETE"
+          Write-Host "============================================"
