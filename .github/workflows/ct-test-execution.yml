@@ -6,13 +6,13 @@ on:
       - ct_test_execution
 
 jobs:
-  generate-testguide-playbook:
+  testguide:
     runs-on:
       - self-hosted
       - Windows
       - X64
 
-    timeout-minutes: 60
+    timeout-minutes: 180
 
     concurrency:
       group: testguide-${{ github.event.client_payload.bench_id }}
@@ -20,7 +20,7 @@ jobs:
 
     env:
       # ==========================================================
-      # INPUTS FROM JIRA
+      # JIRA INPUTS
       # ==========================================================
 
       JIRA_KEY: ${{ github.event.client_payload.jira_key }}
@@ -31,29 +31,28 @@ jobs:
       PLAYBOOK_NAME: ${{ github.event.client_payload.playbook_name }}
 
       # ==========================================================
-      # EXISTING LOCAL REPOSITORY
-      #
-      # No checkout, Git, submodule update, or file copy is done.
+      # LOCAL AUTOMATION TREE
+      # Already populated on the runner.
       # ==========================================================
 
       LOCAL_ROOT: 'C:\HIL\Testing\eeint-Test-Automation'
 
-      # ==========================================================
-      # CURRENT CONFIGURATION MAPPING
-      #
-      # TBC and TCF are selected from:
-      # Configurations\SUBSYS1
-      # ==========================================================
-
+      # Current known configuration
       CONFIGURATION_FOLDER: 'SUBSYS1'
 
-      # Existing repository secret.
+      # ==========================================================
+      # ONECX / TESTGUIDE
+      # ==========================================================
+
       ONECX_PROJECT_ID: ${{ secrets.ONECX_PROJECT_ID }}
+
+      # Change only if Swagger uses a different API base.
+      TESTGUIDE_BASE_URL: 'https://testguide-ssp.onecx.vwgroup.com'
 
     steps:
 
       # ==========================================================
-      # 1. VALIDATE JIRA INPUTS
+      # 1. VALIDATE JIRA REQUEST
       # ==========================================================
 
       - name: Validate Jira request
@@ -62,12 +61,12 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           $requiredValues = @{
-            JIRA_KEY = $env:JIRA_KEY
-            BENCH_ID = $env:BENCH_ID
-            BENCH_NAME = $env:BENCH_NAME
-            TARGET_ECU = $env:TARGET_ECU
-            TEST_CASES = $env:TEST_CASES
-            PLAYBOOK_NAME = $env:PLAYBOOK_NAME
+            JIRA_KEY         = $env:JIRA_KEY
+            BENCH_ID         = $env:BENCH_ID
+            BENCH_NAME       = $env:BENCH_NAME
+            TARGET_ECU       = $env:TARGET_ECU
+            TEST_CASES       = $env:TEST_CASES
+            PLAYBOOK_NAME    = $env:PLAYBOOK_NAME
             ONECX_PROJECT_ID = $env:ONECX_PROJECT_ID
           }
 
@@ -85,6 +84,17 @@ jobs:
             throw "Local repository does not exist: $env:LOCAL_ROOT"
           }
 
+          $parsedProjectId = 0
+
+          if (
+            -not [System.Int32]::TryParse(
+              $env:ONECX_PROJECT_ID,
+              [ref]$parsedProjectId
+            )
+          ) {
+            throw "ONECX_PROJECT_ID must be an integer."
+          }
+
           Write-Host ''
           Write-Host '========================================'
           Write-Host 'JIRA EXECUTION REQUEST'
@@ -95,56 +105,15 @@ jobs:
           Write-Host "Target ECU    : $env:TARGET_ECU"
           Write-Host "Test Cases    : $env:TEST_CASES"
           Write-Host "Playbook Name : $env:PLAYBOOK_NAME"
-          Write-Host "OneCX Project : $env:ONECX_PROJECT_ID"
+          Write-Host "Project ID    : $env:ONECX_PROJECT_ID"
           Write-Host '========================================'
 
 
       # ==========================================================
-      # 2. VALIDATE LOCAL REPOSITORY STRUCTURE
-      # ==========================================================
-
-      - name: Validate local repository structure
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          $configurationRoot = Join-Path `
-            $env:LOCAL_ROOT `
-            'Configurations'
-
-          $packagesRoot = Join-Path `
-            $env:LOCAL_ROOT `
-            'Packages'
-
-          if (-not (Test-Path -LiteralPath $configurationRoot)) {
-            throw "Configurations folder is missing: $configurationRoot"
-          }
-
-          if (-not (Test-Path -LiteralPath $packagesRoot)) {
-            throw "Packages folder is missing: $packagesRoot"
-          }
-
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'LOCAL REPOSITORY'
-          Write-Host '========================================'
-          Write-Host "Repository     : $env:LOCAL_ROOT"
-          Write-Host "Configurations : $configurationRoot"
-          Write-Host "Packages       : $packagesRoot"
-          Write-Host '========================================'
-
-
-      # ==========================================================
-      # 3. RESOLVE TESTGUIDE BENCH
+      # 2. RESOLVE TESTGUIDE BENCH
       #
-      # Jira convention:
-      # SYSHIL1
-      #
-      # TestGuide convention:
-      # SysHIL1
-      #
-      # SYSHIL1 uses D:
-      # Other benches currently use C:
+      # SYSHIL1 -> SysHIL1 -> D:
+      # Other current benches -> C:
       # ==========================================================
 
       - name: Resolve TestGuide bench
@@ -152,36 +121,46 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $normalizedBenchId = $env:BENCH_ID.Trim().ToUpperInvariant()
+          $normalizedBenchId =
+            $env:BENCH_ID.Trim().ToUpperInvariant()
 
           switch ($normalizedBenchId) {
+
             'SYSHIL1' {
               $testGuideBench = 'SysHIL1'
-              $workspaceRoot = 'D:\HIL\Testing\eeint-Test-Automation'
+
+              $workspaceRoot =
+                'D:\HIL\Testing\eeint-Test-Automation'
             }
 
             'SYSHIL2' {
               $testGuideBench = 'SysHIL2'
-              $workspaceRoot = 'C:\HIL\Testing\eeint-Test-Automation'
+
+              $workspaceRoot =
+                'C:\HIL\Testing\eeint-Test-Automation'
             }
 
             'SYSHIL5' {
               $testGuideBench = 'SysHIL5'
-              $workspaceRoot = 'C:\HIL\Testing\eeint-Test-Automation'
+
+              $workspaceRoot =
+                'C:\HIL\Testing\eeint-Test-Automation'
             }
 
             default {
-              $testGuideBench = $env:BENCH_ID.Trim()
-              $workspaceRoot = 'C:\HIL\Testing\eeint-Test-Automation'
+              $testGuideBench =
+                $env:BENCH_ID.Trim()
+
+              $workspaceRoot =
+                'C:\HIL\Testing\eeint-Test-Automation'
             }
           }
 
-          $ecuTestStepName = "ecu.test $testGuideBench Start"
+          $ecuTestStepName =
+            "ecu.test $testGuideBench Start"
 
-          $xilIdentifier = (
-            "novi_hq/1stfloor/EE_Lab_novi/" +
-            "$testGuideBench/TestLabPC1"
-          )
+          $xilIdentifier =
+            "novi_hq/1stfloor/EE_Lab_novi/$testGuideBench/TestLabPC1"
 
           "TESTGUIDE_BENCH=$testGuideBench" |
             Out-File `
@@ -211,20 +190,17 @@ jobs:
           Write-Host '========================================'
           Write-Host 'TESTGUIDE BENCH'
           Write-Host '========================================'
-          Write-Host "Jira Bench ID   : $env:BENCH_ID"
-          Write-Host "TestGuide Bench : $testGuideBench"
-          Write-Host "Workspace       : $workspaceRoot"
-          Write-Host "Start Step      : $ecuTestStepName"
-          Write-Host "XIL Identifier  : $xilIdentifier"
+          Write-Host "Bench      : $testGuideBench"
+          Write-Host "Workspace  : $workspaceRoot"
+          Write-Host "Start Step : $ecuTestStepName"
+          Write-Host "XIL        : $xilIdentifier"
           Write-Host '========================================'
 
 
       # ==========================================================
-      # 4. RESOLVE BENCH PACKAGE
+      # 3. RESOLVE BENCH PACKAGE
       #
-      # Example:
-      # bench_name = system-hil
-      #
+      # system-hil ->
       # Packages\system-hil
       # ==========================================================
 
@@ -233,11 +209,10 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $normalizedBenchName = $env:BENCH_NAME.Trim()
-
-          $packageRoot = Join-Path `
-            $env:LOCAL_ROOT `
-            "Packages\$normalizedBenchName"
+          $packageRoot =
+            Join-Path `
+              $env:LOCAL_ROOT `
+              "Packages\$env:BENCH_NAME"
 
           if (-not (Test-Path -LiteralPath $packageRoot)) {
             throw "Bench package does not exist: $packageRoot"
@@ -249,27 +224,15 @@ jobs:
               -Encoding utf8 `
               -Append
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'BENCH PACKAGE'
-          Write-Host '========================================'
-          Write-Host "Bench Name : $normalizedBenchName"
-          Write-Host "Path       : $packageRoot"
-          Write-Host '========================================'
+          Write-Host "Package: $packageRoot"
 
 
       # ==========================================================
-      # 5. RESOLVE TBC AND TCF
+      # 4. RESOLVE TBC AND TCF
       #
-      # Current expected folder:
+      # Known current configuration:
+      #
       # Configurations\SUBSYS1
-      #
-      # Current expected filenames:
-      # SUBSYS1_TestBenchConfig.tbc
-      # SUBSYS1_TestConfig.tcf
-      #
-      # Exact expected files are preferred.
-      # Recursive discovery is used only as a fallback.
       # ==========================================================
 
       - name: Resolve TBC and TCF
@@ -277,34 +240,31 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $configurationFolder = $env:CONFIGURATION_FOLDER.Trim()
+          $configurationFolder =
+            $env:CONFIGURATION_FOLDER.Trim()
 
-          $configurationRoot = Join-Path `
-            $env:LOCAL_ROOT `
-            "Configurations\$configurationFolder"
+          $configurationRoot =
+            Join-Path `
+              $env:LOCAL_ROOT `
+              "Configurations\$configurationFolder"
 
           if (-not (Test-Path -LiteralPath $configurationRoot)) {
-            throw "Configuration folder does not exist: $configurationRoot"
+            throw "Configuration folder not found: $configurationRoot"
           }
 
-          $expectedTbcName = (
-            "${configurationFolder}_TestBenchConfig.tbc"
-          )
+          $expectedTbc =
+            Join-Path `
+              $configurationRoot `
+              "${configurationFolder}_TestBenchConfig.tbc"
 
-          $expectedTcfName = (
-            "${configurationFolder}_TestConfig.tcf"
-          )
+          $expectedTcf =
+            Join-Path `
+              $configurationRoot `
+              "${configurationFolder}_TestConfig.tcf"
 
-          $expectedTbcPath = Join-Path `
-            $configurationRoot `
-            $expectedTbcName
-
-          $expectedTcfPath = Join-Path `
-            $configurationRoot `
-            $expectedTcfName
-
-          if (Test-Path -LiteralPath $expectedTbcPath) {
-            $selectedTbc = Get-Item -LiteralPath $expectedTbcPath
+          if (Test-Path -LiteralPath $expectedTbc) {
+            $selectedTbc =
+              Get-Item -LiteralPath $expectedTbc
           }
           else {
             $tbcCandidates = @(
@@ -312,31 +272,20 @@ jobs:
                 -LiteralPath $configurationRoot `
                 -Filter '*.tbc' `
                 -File `
-                -Recurse `
-                -ErrorAction Stop
+                -Recurse
             )
 
             if ($tbcCandidates.Count -ne 1) {
-              Write-Host ''
-              Write-Host 'TBC candidates:'
-
-              $tbcCandidates |
-                ForEach-Object {
-                  Write-Host "  $($_.FullName)"
-                }
-
-              throw (
-                "Expected exactly one TBC under " +
-                "$configurationRoot. Found " +
-                "$($tbcCandidates.Count)."
-              )
+              throw "Expected exactly one TBC. Found $($tbcCandidates.Count)."
             }
 
-            $selectedTbc = $tbcCandidates[0]
+            $selectedTbc =
+              $tbcCandidates[0]
           }
 
-          if (Test-Path -LiteralPath $expectedTcfPath) {
-            $selectedTcf = Get-Item -LiteralPath $expectedTcfPath
+          if (Test-Path -LiteralPath $expectedTcf) {
+            $selectedTcf =
+              Get-Item -LiteralPath $expectedTcf
           }
           else {
             $tcfCandidates = @(
@@ -344,75 +293,51 @@ jobs:
                 -LiteralPath $configurationRoot `
                 -Filter '*.tcf' `
                 -File `
-                -Recurse `
-                -ErrorAction Stop
+                -Recurse
             )
 
             if ($tcfCandidates.Count -ne 1) {
-              Write-Host ''
-              Write-Host 'TCF candidates:'
-
-              $tcfCandidates |
-                ForEach-Object {
-                  Write-Host "  $($_.FullName)"
-                }
-
-              throw (
-                "Expected exactly one TCF under " +
-                "$configurationRoot. Found " +
-                "$($tcfCandidates.Count)."
-              )
+              throw "Expected exactly one TCF. Found $($tcfCandidates.Count)."
             }
 
-            $selectedTcf = $tcfCandidates[0]
+            $selectedTcf =
+              $tcfCandidates[0]
           }
 
-          $tbcRelativePath = (
+          $tbcRelative =
             [System.IO.Path]::GetRelativePath(
               $env:LOCAL_ROOT,
               $selectedTbc.FullName
             )
-          )
 
-          $tcfRelativePath = (
+          $tcfRelative =
             [System.IO.Path]::GetRelativePath(
               $env:LOCAL_ROOT,
               $selectedTcf.FullName
             )
-          )
 
-          "TBC_RELATIVE_PATH=$tbcRelativePath" |
+          "TBC_RELATIVE_PATH=$tbcRelative" |
             Out-File `
               -FilePath $env:GITHUB_ENV `
               -Encoding utf8 `
               -Append
 
-          "TCF_RELATIVE_PATH=$tcfRelativePath" |
+          "TCF_RELATIVE_PATH=$tcfRelative" |
             Out-File `
               -FilePath $env:GITHUB_ENV `
               -Encoding utf8 `
               -Append
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'TEST CONFIGURATION'
-          Write-Host '========================================'
-          Write-Host "Configuration : $configurationFolder"
-          Write-Host "TBC           : $tbcRelativePath"
-          Write-Host "TCF           : $tcfRelativePath"
-          Write-Host '========================================'
+          Write-Host "TBC: $tbcRelative"
+          Write-Host "TCF: $tcfRelative"
 
 
       # ==========================================================
-      # 6. RESOLVE ECU PROJECT
+      # 5. RESOLVE PRJ
       #
-      # Naming convention:
+      # Jira TARGET_ECU:
       #
-      # <TARGET_ECU>_L2QualityGate.prj
-      #
-      # Example:
-      #
-      # TARGET_ECU = VAS_FL
+      # VAS_FL
       #
       # Expected:
       #
@@ -424,31 +349,31 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $targetEcu = $env:TARGET_ECU.Trim()
+          $targetEcu =
+            $env:TARGET_ECU.Trim()
 
-          $expectedProjectName = (
+          $expectedProjectName =
             "${targetEcu}_L2QualityGate.prj"
-          )
 
           Write-Host ''
           Write-Host '========================================'
-          Write-Host 'ECU PROJECT RESOLUTION'
+          Write-Host 'PROJECT RESOLUTION'
           Write-Host '========================================'
-          Write-Host "Target ECU   : $targetEcu"
+          Write-Host "ECU          : $targetEcu"
           Write-Host "Expected PRJ : $expectedProjectName"
-          Write-Host "Package Root : $env:PACKAGE_ROOT"
+          Write-Host "Package      : $env:PACKAGE_ROOT"
           Write-Host '========================================'
 
-          $projectMatches = @(
+          $matches = @(
             Get-ChildItem `
               -LiteralPath $env:PACKAGE_ROOT `
               -Filter $expectedProjectName `
               -File `
-              -Recurse `
-              -ErrorAction Stop
+              -Recurse
           )
 
-          if ($projectMatches.Count -eq 0) {
+          if ($matches.Count -eq 0) {
+
             Write-Host ''
             Write-Host 'Available L2 Quality Gate projects:'
 
@@ -465,58 +390,37 @@ jobs:
             throw "Project not found: $expectedProjectName"
           }
 
-          if ($projectMatches.Count -gt 1) {
-            Write-Host ''
-            Write-Host 'Multiple matching projects:'
+          if ($matches.Count -gt 1) {
 
-            $projectMatches |
+            $matches |
               ForEach-Object {
                 Write-Host "  $($_.FullName)"
               }
 
-            throw (
-              "Multiple instances of " +
-              "$expectedProjectName were found."
-            )
+            throw "Multiple instances of $expectedProjectName found."
           }
 
-          $selectedProject = $projectMatches[0]
+          $selected =
+            $matches[0]
 
-          $projectRelativePath = (
+          $relative =
             [System.IO.Path]::GetRelativePath(
               $env:LOCAL_ROOT,
-              $selectedProject.FullName
+              $selected.FullName
             )
-          )
 
-          "PROJECT_RELATIVE_PATH=$projectRelativePath" |
-            Out-File `
-              -FilePath $env:GITHUB_ENV `
-              -Encoding utf8 `
-              -Append
-
-          "LOCAL_PROJECT_PATH=$($selectedProject.FullName)" |
+          "PROJECT_RELATIVE_PATH=$relative" |
             Out-File `
               -FilePath $env:GITHUB_ENV `
               -Encoding utf8 `
               -Append
 
           Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'PROJECT SELECTED'
-          Write-Host '========================================'
-          Write-Host "ECU      : $targetEcu"
-          Write-Host "File     : $($selectedProject.Name)"
-          Write-Host "Full     : $($selectedProject.FullName)"
-          Write-Host "Relative : $projectRelativePath"
-          Write-Host '========================================'
+          Write-Host "Selected project: $relative"
 
 
       # ==========================================================
-      # 7. PARSE JIRA TEST CASE IDS
-      #
-      # Stored for later execute-request parameters.
-      # The full PRJ remains the execution entry in this playbook.
+      # 6. PARSE TEST CASE IDS
       # ==========================================================
 
       - name: Parse Jira Test Cases
@@ -524,7 +428,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $testCaseIds = @(
+          $ids = @(
             $env:TEST_CASES -split '[,;]' |
             ForEach-Object {
               $_.Trim()
@@ -534,33 +438,24 @@ jobs:
             }
           )
 
-          if ($testCaseIds.Count -eq 0) {
-            throw 'No valid Jira Test Case IDs were supplied.'
+          if ($ids.Count -eq 0) {
+            throw 'No valid Jira Test Case IDs.'
           }
 
-          $normalizedTestCases = $testCaseIds -join ','
+          $normalized =
+            $ids -join ','
 
-          "NORMALIZED_TEST_CASES=$normalizedTestCases" |
+          "NORMALIZED_TEST_CASES=$normalized" |
             Out-File `
               -FilePath $env:GITHUB_ENV `
               -Encoding utf8 `
               -Append
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'TEST CASE IDS'
-          Write-Host '========================================'
-
-          $testCaseIds |
-            ForEach-Object {
-              Write-Host "  $_"
-            }
-
-          Write-Host '========================================'
+          Write-Host "Test Cases: $normalized"
 
 
       # ==========================================================
-      # 8. GENERATE EXACT TESTGUIDE PLAYBOOK STRUCTURE
+      # 7. GENERATE EXACT PLAYBOOK STRUCTURE
       # ==========================================================
 
       - name: Generate TestGuide playbook
@@ -571,25 +466,28 @@ jobs:
           $playbook = [ordered]@{
 
             metadata = [ordered]@{
-              name = $env:PLAYBOOK_NAME
+              name =
+                $env:PLAYBOOK_NAME
 
-              taskNameTemplate = (
-                '${playbook_name} ' +
-                '(${playbook_datetime}) ' +
-                '${distribution_count}'
-              )
+              taskNameTemplate =
+                '${playbook_name} (${playbook_datetime}) ${distribution_count}'
 
-              labels = @()
+              labels =
+                @()
             }
 
 
             workspace = [ordered]@{
               source = [ordered]@{
-                path = $env:TESTGUIDE_ROOT
-                sourceType = 'location'
+                path =
+                  $env:TESTGUIDE_ROOT
+
+                sourceType =
+                  'location'
               }
 
-              dependencies = @()
+              dependencies =
+                @()
             }
 
 
@@ -597,18 +495,34 @@ jobs:
               steps = @(
 
                 [ordered]@{
-                  reuse = 'always'
-                  keepConfiguration = $false
-                  waitMinutesForLicense = 0
-                  stepName = $env:ECUTEST_STEP_NAME
-                  type = 'ecuTestStart'
+                  reuse =
+                    'always'
+
+                  keepConfiguration =
+                    $false
+
+                  waitMinutesForLicense =
+                    0
+
+                  stepName =
+                    $env:ECUTEST_STEP_NAME
+
+                  type =
+                    'ecuTestStart'
                 },
 
                 [ordered]@{
-                  tbcPath = $env:TBC_RELATIVE_PATH
-                  tcfPath = $env:TCF_RELATIVE_PATH
-                  stepName = 'Test Configuration Selection'
-                  type = 'configuration'
+                  tbcPath =
+                    $env:TBC_RELATIVE_PATH
+
+                  tcfPath =
+                    $env:TCF_RELATIVE_PATH
+
+                  stepName =
+                    'Test Configuration Selection'
+
+                  type =
+                    'configuration'
                 }
               )
             }
@@ -618,9 +532,14 @@ jobs:
               testcases = @(
 
                 [ordered]@{
-                  relativePath = $env:PROJECT_RELATIVE_PATH
-                  stepName = $env:ECUTEST_STEP_NAME
-                  type = 'project'
+                  relativePath =
+                    $env:PROJECT_RELATIVE_PATH
+
+                  stepName =
+                    $env:ECUTEST_STEP_NAME
+
+                  type =
+                    'project'
                 }
               )
             }
@@ -630,7 +549,8 @@ jobs:
               steps = @(
 
                 [ordered]@{
-                  type = 'ecuTestStop'
+                  type =
+                    'ecuTestStop'
                 }
               )
             }
@@ -639,29 +559,36 @@ jobs:
             xilConfigRequirements = @(
 
               [ordered]@{
-                label = 'Identifier'
-                category = 'XIL'
-                value = $env:XIL_IDENTIFIER
-                type = 'configuration'
+                label =
+                  'Identifier'
+
+                category =
+                  'XIL'
+
+                value =
+                  $env:XIL_IDENTIFIER
+
+                type =
+                  'configuration'
               }
             )
           }
 
-          $playbookJson = (
+          $json =
             $playbook |
             ConvertTo-Json -Depth 30
-          )
 
-          $playbookFile = Join-Path `
-            $env:RUNNER_TEMP `
-            'testguide-playbook.json'
+          $file =
+            Join-Path `
+              $env:RUNNER_TEMP `
+              'testguide-playbook.json'
 
-          $playbookJson |
+          $json |
             Set-Content `
-              -LiteralPath $playbookFile `
+              -LiteralPath $file `
               -Encoding utf8
 
-          "TESTGUIDE_PLAYBOOK_FILE=$playbookFile" |
+          "TESTGUIDE_PLAYBOOK_FILE=$file" |
             Out-File `
               -FilePath $env:GITHUB_ENV `
               -Encoding utf8 `
@@ -669,14 +596,14 @@ jobs:
 
           Write-Host ''
           Write-Host '========================================'
-          Write-Host 'GENERATED TESTGUIDE PLAYBOOK'
+          Write-Host 'GENERATED PLAYBOOK'
           Write-Host '========================================'
-          Write-Host $playbookJson
+          Write-Host $json
           Write-Host '========================================'
 
 
       # ==========================================================
-      # 9. VALIDATE GENERATED PLAYBOOK
+      # 8. VALIDATE PLAYBOOK BEFORE API CALL
       # ==========================================================
 
       - name: Validate generated playbook
@@ -690,30 +617,14 @@ jobs:
                 -LiteralPath $env:TESTGUIDE_PLAYBOOK_FILE
             )
           ) {
-            throw 'Generated playbook JSON does not exist.'
+            throw 'Generated playbook JSON is missing.'
           }
 
-          $playbook = (
+          $playbook =
             Get-Content `
               -LiteralPath $env:TESTGUIDE_PLAYBOOK_FILE `
               -Raw |
             ConvertFrom-Json
-          )
-
-          $requiredProperties = @(
-            'metadata',
-            'workspace',
-            'setup',
-            'execution',
-            'teardown',
-            'xilConfigRequirements'
-          )
-
-          foreach ($property in $requiredProperties) {
-            if ($null -eq $playbook.$property) {
-              throw "Generated playbook is missing '$property'."
-            }
-          }
 
           if ($playbook.setup.steps.Count -ne 2) {
             throw 'Expected exactly 2 setup steps.'
@@ -723,39 +634,328 @@ jobs:
             throw 'Expected exactly 1 project execution entry.'
           }
 
-          if ($playbook.teardown.steps.Count -ne 1) {
-            throw 'Expected exactly 1 teardown step.'
+          if ($playbook.xilConfigRequirements.Count -ne 1) {
+            throw 'Expected exactly 1 XIL configuration requirement.'
           }
 
-          if ($playbook.xilConfigRequirements.Count -ne 1) {
-            throw 'Expected exactly 1 XIL requirement.'
-          }
+          Write-Host ''
+          Write-Host 'Playbook validation successful.'
+
+
+      # ==========================================================
+      # 9. UPLOAD PLAYBOOK
+      #
+      # CONFIRMED SWAGGER:
+      #
+      # POST /playbook
+      #
+      # Query:
+      # projectId = required
+      # folder = optional, default "/"
+      #
+      # Body:
+      # application/json
+      #
+      # Response:
+      #
+      # {
+      #   "playbookId": 1,
+      #   "playbookLink": "...",
+      #   "warnings": []
+      # }
+      # ==========================================================
+
+      - name: Upload TestGuide playbook
+        shell: pwsh
+        env:
+          ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
 
           if (
-            $playbook.execution.testcases[0].relativePath -ne
-            $env:PROJECT_RELATIVE_PATH
+            [System.String]::IsNullOrWhiteSpace(
+              $env:ONECX_AUTH_KEY
+            )
           ) {
-            throw 'Generated project path does not match the selected PRJ.'
+            throw 'ONECX_AUTH_KEY is missing.'
+          }
+
+          $baseUrl =
+            $env:TESTGUIDE_BASE_URL.TrimEnd('/')
+
+          $folder =
+            [System.Uri]::EscapeDataString('/')
+
+          $uploadUrl = (
+            "$baseUrl/playbook" +
+            "?projectId=$env:ONECX_PROJECT_ID" +
+            "&folder=$folder"
+          )
+
+          $authValue =
+            $env:ONECX_AUTH_KEY.Trim()
+
+          if (
+            -not $authValue.StartsWith(
+              'Bearer ',
+              [System.StringComparison]::OrdinalIgnoreCase
+            )
+          ) {
+            $authValue =
+              "Bearer $authValue"
+          }
+
+          $headers = @{
+            Authorization = $authValue
+            Accept = 'application/json'
+          }
+
+          $body =
+            Get-Content `
+              -LiteralPath $env:TESTGUIDE_PLAYBOOK_FILE `
+              -Raw
+
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'UPLOAD PLAYBOOK'
+          Write-Host '========================================'
+          Write-Host "URL      : $uploadUrl"
+          Write-Host "Project  : $env:ONECX_PROJECT_ID"
+          Write-Host "Playbook : $env:PLAYBOOK_NAME"
+          Write-Host '========================================'
+
+          $response =
+            Invoke-RestMethod `
+              -Method POST `
+              -Uri $uploadUrl `
+              -Headers $headers `
+              -ContentType 'application/json' `
+              -Body $body
+
+          if ($null -eq $response) {
+            throw 'TestGuide returned an empty upload response.'
+          }
+
+          $playbookId =
+            [System.String]$response.playbookId
+
+          if (
+            [System.String]::IsNullOrWhiteSpace(
+              $playbookId
+            )
+          ) {
+            throw 'TestGuide upload did not return playbookId.'
           }
 
           Write-Host ''
           Write-Host '========================================'
-          Write-Host 'PLAYBOOK VALIDATION SUCCESSFUL'
+          Write-Host 'PLAYBOOK STORED'
           Write-Host '========================================'
-          Write-Host "Name      : $($playbook.metadata.name)"
-          Write-Host "Workspace : $($playbook.workspace.source.path)"
-          Write-Host "TBC       : $($playbook.setup.steps[1].tbcPath)"
-          Write-Host "TCF       : $($playbook.setup.steps[1].tcfPath)"
-          Write-Host "PRJ       : $($playbook.execution.testcases[0].relativePath)"
-          Write-Host "XIL       : $($playbook.xilConfigRequirements[0].value)"
+          Write-Host "Playbook ID   : $playbookId"
+          Write-Host "Playbook Link : $($response.playbookLink)"
+
+          if ($null -ne $response.warnings) {
+
+            foreach ($warning in $response.warnings) {
+              Write-Warning $warning
+            }
+          }
+
+          "TESTGUIDE_PLAYBOOK_ID=$playbookId" |
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
+
+          "TESTGUIDE_PLAYBOOK_LINK=$($response.playbookLink)" |
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
+
+
+      # ==========================================================
+      # 10. EXECUTE PLAYBOOK
+      #
+      # CONFIRMED ENDPOINT:
+      #
+      # POST /playbook/{playbookId}/execute
+      #
+      # Required query:
+      # projectId
+      # ==========================================================
+
+      - name: Execute TestGuide playbook
+        shell: pwsh
+        env:
+          ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          if (
+            [System.String]::IsNullOrWhiteSpace(
+              $env:TESTGUIDE_PLAYBOOK_ID
+            )
+          ) {
+            throw 'TESTGUIDE_PLAYBOOK_ID is missing.'
+          }
+
+          $baseUrl =
+            $env:TESTGUIDE_BASE_URL.TrimEnd('/')
+
+          $executeUrl = (
+            "$baseUrl/playbook/" +
+            "$env:TESTGUIDE_PLAYBOOK_ID/execute" +
+            "?projectId=$env:ONECX_PROJECT_ID" +
+            "&checkLastExecution=true"
+          )
+
+          $authValue =
+            $env:ONECX_AUTH_KEY.Trim()
+
+          if (
+            -not $authValue.StartsWith(
+              'Bearer ',
+              [System.StringComparison]::OrdinalIgnoreCase
+            )
+          ) {
+            $authValue =
+              "Bearer $authValue"
+          }
+
+          $headers = @{
+            Authorization = $authValue
+            Accept = 'application/json'
+          }
+
+          $jiraUrl = (
+            'https://scoutmotors.atlassian.net/browse/' +
+            $env:JIRA_KEY
+          )
+
+          $executeRequest = [ordered]@{
+
+            name =
+              '${playbook_name} (${playbook_datetime}) ${distribution_count}'
+
+            priority =
+              42
+
+            parameters = @(
+
+              [ordered]@{
+                label = 'JiraKey'
+                value = $env:JIRA_KEY
+              },
+
+              [ordered]@{
+                label = 'BenchId'
+                value = $env:BENCH_ID
+              },
+
+              [ordered]@{
+                label = 'TargetEcu'
+                value = $env:TARGET_ECU
+              },
+
+              [ordered]@{
+                label = 'TestCaseIds'
+                value = $env:NORMALIZED_TEST_CASES
+              }
+            )
+
+            additionalSettings = [ordered]@{
+
+              analysisExecutionMode =
+                'sequential'
+
+              downstreamAnalysisPartitioning =
+                'analysis'
+
+              expirationTimeInMinutes =
+                1
+
+              issueTrackerTickets =
+                @($jiraUrl)
+
+              remainingRetriesOnError =
+                0
+            }
+          }
+
+          $executeJson =
+            $executeRequest |
+            ConvertTo-Json -Depth 30
+
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'EXECUTE TESTGUIDE PLAYBOOK'
+          Write-Host '========================================'
+          Write-Host "URL         : $executeUrl"
+          Write-Host "Playbook ID : $env:TESTGUIDE_PLAYBOOK_ID"
+          Write-Host "Project ID  : $env:ONECX_PROJECT_ID"
+          Write-Host "Jira        : $env:JIRA_KEY"
+          Write-Host "Bench       : $env:BENCH_ID"
+          Write-Host "ECU         : $env:TARGET_ECU"
+          Write-Host "Test Cases  : $env:NORMALIZED_TEST_CASES"
+          Write-Host '========================================'
+
+          Write-Host ''
+          Write-Host 'Execution request:'
+          Write-Host $executeJson
+
+          $response =
+            Invoke-RestMethod `
+              -Method POST `
+              -Uri $executeUrl `
+              -Headers $headers `
+              -ContentType 'application/json' `
+              -Body $executeJson
+
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'EXECUTION RESPONSE'
+          Write-Host '========================================'
+
+          if ($null -eq $response) {
+
+            Write-Host 'TestGuide accepted the execute request.'
+            Write-Host 'No response body was returned.'
+
+          }
+          else {
+
+            $responseJson =
+              $response |
+              ConvertTo-Json -Depth 30
+
+            Write-Host $responseJson
+
+            $responseFile =
+              Join-Path `
+                $env:RUNNER_TEMP `
+                'testguide-execution-response.json'
+
+            $responseJson |
+              Set-Content `
+                -LiteralPath $responseFile `
+                -Encoding utf8
+
+            "TESTGUIDE_EXECUTION_RESPONSE_FILE=$responseFile" |
+              Out-File `
+                -FilePath $env:GITHUB_ENV `
+                -Encoding utf8 `
+                -Append
+          }
+
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'TESTGUIDE EXECUTION SUBMITTED'
           Write-Host '========================================'
 
 
       # ==========================================================
-      # 10. PUBLISH SUMMARY
-      #
-      # This version validates Jira-driven playbook generation.
-      # It does not upload or execute the playbook yet.
+      # 11. SUMMARY
       # ==========================================================
 
       - name: Publish execution summary
@@ -763,7 +963,7 @@ jobs:
         shell: pwsh
         run: |
           $summary = @(
-            '## Jira-driven TestGuide playbook',
+            '## TestGuide execution',
             '',
             '| Field | Value |',
             '|---|---|',
@@ -771,15 +971,14 @@ jobs:
             "| Bench | $env:TESTGUIDE_BENCH |",
             "| Bench Name | $env:BENCH_NAME |",
             "| Target ECU | $env:TARGET_ECU |",
-            "| Expected PRJ | $($env:TARGET_ECU)_L2QualityGate.prj |",
             "| Test Cases | $env:NORMALIZED_TEST_CASES |",
             "| Playbook | $env:PLAYBOOK_NAME |",
+            "| Playbook ID | $env:TESTGUIDE_PLAYBOOK_ID |",
             "| Workspace | $env:TESTGUIDE_ROOT |",
             "| TBC | $env:TBC_RELATIVE_PATH |",
             "| TCF | $env:TCF_RELATIVE_PATH |",
             "| PRJ | $env:PROJECT_RELATIVE_PATH |",
             "| XIL | $env:XIL_IDENTIFIER |",
-            "| JSON | $env:TESTGUIDE_PLAYBOOK_FILE |",
             "| Status | ${{ job.status }} |"
           )
 
