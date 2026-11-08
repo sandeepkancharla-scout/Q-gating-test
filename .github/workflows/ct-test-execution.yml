@@ -35,7 +35,6 @@ jobs:
       # ==========================================================
 
       LOCAL_ROOT: 'C:\HIL\Testing\eeint-Test-Automation'
-
       CONFIGURATION_FOLDER: 'SUBSYS1'
 
       # ==========================================================
@@ -72,7 +71,6 @@ jobs:
           }
 
           foreach ($entry in $requiredValues.GetEnumerator()) {
-
             if (
               [System.String]::IsNullOrWhiteSpace(
                 [System.String]$entry.Value
@@ -224,7 +222,6 @@ jobs:
             $selectedTbc = Get-Item -LiteralPath $expectedTbc
           }
           else {
-
             $tbcFiles = @(
               Get-ChildItem `
                 -LiteralPath $configRoot `
@@ -244,7 +241,6 @@ jobs:
             $selectedTcf = Get-Item -LiteralPath $expectedTcf
           }
           else {
-
             $tcfFiles = @(
               Get-ChildItem `
                 -LiteralPath $configRoot `
@@ -507,7 +503,7 @@ jobs:
 
 
       # ==========================================================
-      # 9. UPLOAD PLAYBOOK TO ONE.CX
+      # 9. UPLOAD PLAYBOOK
       # ==========================================================
 
       - name: Upload TestGuide playbook
@@ -572,7 +568,6 @@ jobs:
             Write-Host "Exception: $($_.Exception.Message)"
 
             if ($null -ne $_.Exception.Response) {
-
               try {
                 Write-Host "HTTP Status: $([int]$_.Exception.Response.StatusCode)"
               }
@@ -585,8 +580,6 @@ jobs:
               Write-Host "Response body: $($_.ErrorDetails.Message)"
             }
 
-            Write-Host '========================================'
-
             throw
           }
 
@@ -594,20 +587,13 @@ jobs:
             throw 'ONE.CX returned an empty upload response.'
           }
 
-          Write-Host ''
-          Write-Host 'Upload response:'
-
           $response |
             ConvertTo-Json -Depth 20 |
             Write-Host
 
           $playbookId = [System.String]$response.playbookId
 
-          if (
-            [System.String]::IsNullOrWhiteSpace(
-              $playbookId
-            )
-          ) {
+          if ([System.String]::IsNullOrWhiteSpace($playbookId)) {
             throw 'ONE.CX upload did not return playbookId.'
           }
 
@@ -618,12 +604,8 @@ jobs:
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
           Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'PLAYBOOK STORED'
-          Write-Host '========================================'
           Write-Host "Playbook ID   : $playbookId"
           Write-Host "Playbook Link : $($response.playbookLink)"
-          Write-Host '========================================'
 
 
       # ==========================================================
@@ -715,7 +697,6 @@ jobs:
             Write-Host "Exception: $($_.Exception.Message)"
 
             if ($null -ne $_.Exception.Response) {
-
               try {
                 Write-Host "HTTP Status: $([int]$_.Exception.Response.StatusCode)"
               }
@@ -727,8 +708,6 @@ jobs:
             if ($null -ne $_.ErrorDetails) {
               Write-Host "Response body: $($_.ErrorDetails.Message)"
             }
-
-            Write-Host '========================================'
 
             throw
           }
@@ -757,12 +736,7 @@ jobs:
           "TESTGUIDE_TASK_ID=$taskId" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-          Write-Host ''
           Write-Host "Task ID: $taskId"
-
-          Write-Host '========================================'
-          Write-Host 'TESTGUIDE EXECUTION SUBMITTED'
-          Write-Host '========================================'
 
 
       # ==========================================================
@@ -870,11 +844,6 @@ jobs:
 
             if ($state -in $failureStates) {
 
-              Write-Host ''
-              Write-Host '========================================'
-              Write-Host 'TESTGUIDE TASK FAILED'
-              Write-Host '========================================'
-
               $task |
                 ConvertTo-Json -Depth 50 |
                 Write-Host
@@ -938,10 +907,6 @@ jobs:
 
       # ==========================================================
       # 12. DISCOVER REPORT DEPOSITORY
-      #
-      # IMPORTANT:
-      # Select one actual depository object.
-      # Do not concatenate all depository IDs.
       # ==========================================================
 
       - name: Discover TestGuide report depository
@@ -966,9 +931,6 @@ jobs:
           Write-Host ''
           Write-Host '========================================'
           Write-Host 'DISCOVER ARTIFACT DEPOSITORIES'
-          Write-Host '========================================'
-          Write-Host "Project ID: $env:ONECX_PROJECT_ID"
-          Write-Host "URL       : $depositoriesUrl"
           Write-Host '========================================'
 
           $response = Invoke-RestMethod `
@@ -1019,7 +981,6 @@ jobs:
           }
 
           if ($null -eq $reportDepository) {
-
             throw (
               "No Report Artifacts depository found for project " +
               "$env:ONECX_PROJECT_ID."
@@ -1037,7 +998,6 @@ jobs:
             throw 'Report depository ID is empty.'
           }
 
-          # API validation requires 3-15 alphanumeric characters.
           if ($depositoryId -notmatch '^[a-zA-Z0-9]{3,15}$') {
             throw "Invalid report depository ID: $depositoryId"
           }
@@ -1065,6 +1025,10 @@ jobs:
 
       # ==========================================================
       # 13. FIND REPORT ARTIFACT CANDIDATES
+      #
+      # IMPORTANT:
+      # Preserve the TestGuide task clock values.
+      # Do NOT convert these values using UtcDateTime.
       # ==========================================================
 
       - name: Find matching report artifact candidates
@@ -1099,16 +1063,6 @@ jobs:
             throw 'TASK_END_DATE is missing.'
           }
 
-          if (
-            $env:REPORT_DEPOSITORY_ID -notmatch
-              '^[a-zA-Z0-9]{3,15}$'
-          ) {
-            throw (
-              "Invalid REPORT_DEPOSITORY_ID: " +
-              "$env:REPORT_DEPOSITORY_ID"
-            )
-          }
-
           $headers = @{
             'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
             'Accept' = 'application/json'
@@ -1116,12 +1070,12 @@ jobs:
 
           try {
 
-            $taskStart = [System.DateTimeOffset]::Parse(
+            $taskStart = [System.DateTime]::Parse(
               $env:TASK_START_DATE,
               [System.Globalization.CultureInfo]::InvariantCulture
             )
 
-            $taskEnd = [System.DateTimeOffset]::Parse(
+            $taskEnd = [System.DateTime]::Parse(
               $env:TASK_END_DATE,
               [System.Globalization.CultureInfo]::InvariantCulture
             )
@@ -1136,15 +1090,29 @@ jobs:
             )
           }
 
+          # ------------------------------------------------------
+          # TIMESTAMP FIX
+          #
+          # TestGuide returned for example:
+          #
+          #   11/08/2026 16:42:30
+          #
+          # Keep that as 16:42.
+          #
+          # Do NOT convert to:
+          #
+          #   21:42Z
+          # ------------------------------------------------------
+
           $searchStart = $taskStart.AddMinutes(-1)
           $searchEnd = $taskEnd.AddMinutes(5)
 
-          $startText = $searchStart.UtcDateTime.ToString(
-            'yyyy-MM-ddTHH:mm:ss.fffZ'
+          $startText = $searchStart.ToString(
+            'yyyy-MM-ddTHH:mm:ss.fff'
           )
 
-          $endText = $searchEnd.UtcDateTime.ToString(
-            'yyyy-MM-ddTHH:mm:ss.fffZ'
+          $endText = $searchEnd.ToString(
+            'yyyy-MM-ddTHH:mm:ss.fff'
           )
 
           $encodedDepository = [System.Uri]::EscapeDataString(
