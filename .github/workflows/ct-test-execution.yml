@@ -750,11 +750,7 @@ jobs:
 
           $taskId = [System.String]$taskIds[0]
 
-          if (
-            [System.String]::IsNullOrWhiteSpace(
-              $taskId
-            )
-          ) {
+          if ([System.String]::IsNullOrWhiteSpace($taskId)) {
             throw 'Returned taskId is empty.'
           }
 
@@ -942,6 +938,10 @@ jobs:
 
       # ==========================================================
       # 12. DISCOVER REPORT DEPOSITORY
+      #
+      # IMPORTANT:
+      # Select one actual depository object.
+      # Do not concatenate all depository IDs.
       # ==========================================================
 
       - name: Discover TestGuide report depository
@@ -971,13 +971,13 @@ jobs:
           Write-Host "URL       : $depositoriesUrl"
           Write-Host '========================================'
 
-          $depositories = @(
-            Invoke-RestMethod `
-              -Method GET `
-              -Uri $depositoriesUrl `
-              -Headers $headers `
-              -ErrorAction Stop
-          )
+          $response = Invoke-RestMethod `
+            -Method GET `
+            -Uri $depositoriesUrl `
+            -Headers $headers `
+            -ErrorAction Stop
+
+          $depositories = @($response)
 
           Write-Host ''
           Write-Host 'Available depositories:'
@@ -991,54 +991,76 @@ jobs:
             )
           }
 
-          $reportDepositories = @(
-            $depositories |
-            Where-Object {
-              ([System.String]$_.name).Trim() -eq 'Report Artifacts'
+          $reportDepository = $null
+
+          foreach ($depository in $depositories) {
+
+            $depositoryName = [System.String]$depository.name
+
+            if ($depositoryName.Trim() -eq 'Report Artifacts') {
+
+              $reportDepository = $depository
+              break
             }
-          )
-
-          if ($reportDepositories.Count -eq 0) {
-
-            $reportDepositories = @(
-              $depositories |
-              Where-Object {
-                ([System.String]$_.name) -match '(?i)report'
-              }
-            )
           }
 
-          if ($reportDepositories.Count -eq 0) {
+          if ($null -eq $reportDepository) {
+
+            foreach ($depository in $depositories) {
+
+              $depositoryName = [System.String]$depository.name
+
+              if ($depositoryName -match '(?i)report') {
+
+                $reportDepository = $depository
+                break
+              }
+            }
+          }
+
+          if ($null -eq $reportDepository) {
+
             throw (
-              "No report depository found for project " +
+              "No Report Artifacts depository found for project " +
               "$env:ONECX_PROJECT_ID."
             )
           }
 
-          if ($reportDepositories.Count -gt 1) {
+          $depositoryId = [System.String]$reportDepository.id
+          $depositoryName = [System.String]$reportDepository.name
 
-            $ids = @(
-              $reportDepositories |
-              ForEach-Object {
-                $_.id
-              }
-            ) -join ', '
-
-            throw "Multiple report depositories found: $ids"
+          if (
+            [System.String]::IsNullOrWhiteSpace(
+              $depositoryId
+            )
+          ) {
+            throw 'Report depository ID is empty.'
           }
 
-          $depositoryId = [System.String]$reportDepositories[0].id
-
-          "REPORT_DEPOSITORY_ID=$depositoryId" |
-            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          # API validation requires 3-15 alphanumeric characters.
+          if ($depositoryId -notmatch '^[a-zA-Z0-9]{3,15}$') {
+            throw "Invalid report depository ID: $depositoryId"
+          }
 
           Write-Host ''
           Write-Host '========================================'
           Write-Host 'REPORT DEPOSITORY SELECTED'
           Write-Host '========================================'
           Write-Host "ID   : $depositoryId"
-          Write-Host "Name : $($reportDepositories[0].name)"
+          Write-Host "Name : $depositoryName"
           Write-Host '========================================'
+
+          "REPORT_DEPOSITORY_ID=$depositoryId" |
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
+
+          "REPORT_DEPOSITORY_NAME=$depositoryName" |
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
 
 
       # ==========================================================
@@ -1055,6 +1077,14 @@ jobs:
 
           if (
             [System.String]::IsNullOrWhiteSpace(
+              $env:REPORT_DEPOSITORY_ID
+            )
+          ) {
+            throw 'REPORT_DEPOSITORY_ID is missing.'
+          }
+
+          if (
+            [System.String]::IsNullOrWhiteSpace(
               $env:TASK_START_DATE
             )
           ) {
@@ -1067,6 +1097,16 @@ jobs:
             )
           ) {
             throw 'TASK_END_DATE is missing.'
+          }
+
+          if (
+            $env:REPORT_DEPOSITORY_ID -notmatch
+              '^[a-zA-Z0-9]{3,15}$'
+          ) {
+            throw (
+              "Invalid REPORT_DEPOSITORY_ID: " +
+              "$env:REPORT_DEPOSITORY_ID"
+            )
           }
 
           $headers = @{
@@ -1139,13 +1179,13 @@ jobs:
           Write-Host "URL        : $artifactsUrl"
           Write-Host '========================================'
 
-          $artifacts = @(
-            Invoke-RestMethod `
-              -Method GET `
-              -Uri $artifactsUrl `
-              -Headers $headers `
-              -ErrorAction Stop
-          )
+          $response = Invoke-RestMethod `
+            -Method GET `
+            -Uri $artifactsUrl `
+            -Headers $headers `
+            -ErrorAction Stop
+
+          $artifacts = @($response)
 
           $artifactResultFile = Join-Path `
             $env:RUNNER_TEMP `
@@ -1158,10 +1198,16 @@ jobs:
               -Encoding utf8
 
           "TESTGUIDE_ARTIFACT_CANDIDATES_FILE=$artifactResultFile" |
-            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
 
           "REPORT_ARTIFACT_CANDIDATE_COUNT=$($artifacts.Count)" |
-            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
 
           Write-Host ''
           Write-Host '========================================'
@@ -1247,6 +1293,7 @@ jobs:
             "| Task Start | $env:TASK_START_DATE |",
             "| Task End | $env:TASK_END_DATE |",
             "| Report Depository | $env:REPORT_DEPOSITORY_ID |",
+            "| Report Depository Name | $env:REPORT_DEPOSITORY_NAME |",
             "| Artifact Candidates | $env:REPORT_ARTIFACT_CANDIDATE_COUNT |",
             "| Workspace | $env:TESTGUIDE_ROOT |",
             "| TBC | $env:TBC_RELATIVE_PATH |",
