@@ -36,18 +36,16 @@ jobs:
 
       LOCAL_ROOT: 'C:\HIL\Testing\eeint-Test-Automation'
 
-      # Current known configuration
       CONFIGURATION_FOLDER: 'SUBSYS1'
 
       # ==========================================================
-      # ONE.CX
-      # Project ID is stored in GitHub Variables
+      # ONE.CX PROJECT
       # ==========================================================
 
       ONECX_PROJECT_ID: ${{ vars.ONECX_PROJECT_ID }}
 
       # ==========================================================
-      # ONE.CX EXECUTION API
+      # ONE.CX
       # ==========================================================
 
       ONECX_URL: 'https://testguide-ssp.onecx.vwgroup.com'
@@ -74,6 +72,7 @@ jobs:
           }
 
           foreach ($entry in $requiredValues.GetEnumerator()) {
+
             if (
               [System.String]::IsNullOrWhiteSpace(
                 [System.String]$entry.Value
@@ -225,6 +224,7 @@ jobs:
             $selectedTbc = Get-Item -LiteralPath $expectedTbc
           }
           else {
+
             $tbcFiles = @(
               Get-ChildItem `
                 -LiteralPath $configRoot `
@@ -244,6 +244,7 @@ jobs:
             $selectedTcf = Get-Item -LiteralPath $expectedTcf
           }
           else {
+
             $tcfFiles = @(
               Get-ChildItem `
                 -LiteralPath $configRoot `
@@ -281,8 +282,6 @@ jobs:
 
       # ==========================================================
       # 5. RESOLVE EXACT ECU PRJ
-      #
-      # VAS_FL -> VAS_FL_L2QualityGate.prj
       # ==========================================================
 
       - name: Resolve target ECU project
@@ -311,6 +310,7 @@ jobs:
           )
 
           if ($matches.Count -eq 0) {
+
             Write-Host ''
             Write-Host 'Available L2 Quality Gate projects:'
 
@@ -508,16 +508,6 @@ jobs:
 
       # ==========================================================
       # 9. UPLOAD PLAYBOOK TO ONE.CX
-      #
-      # IMPORTANT:
-      #
-      # Earlier successful ONE.CX calls used:
-      #
-      # TestGuide-AuthKey: <key>
-      #
-      # API base:
-      #
-      # /api/v2/execution
       # ==========================================================
 
       - name: Upload TestGuide playbook
@@ -582,6 +572,7 @@ jobs:
             Write-Host "Exception: $($_.Exception.Message)"
 
             if ($null -ne $_.Exception.Response) {
+
               try {
                 Write-Host "HTTP Status: $([int]$_.Exception.Response.StatusCode)"
               }
@@ -724,6 +715,7 @@ jobs:
             Write-Host "Exception: $($_.Exception.Message)"
 
             if ($null -ne $_.Exception.Response) {
+
               try {
                 Write-Host "HTTP Status: $([int]$_.Exception.Response.StatusCode)"
               }
@@ -752,22 +744,25 @@ jobs:
 
           $taskIds = @($response.taskIds)
 
-          if ($taskIds.Count -gt 0) {
-
-            $taskId = [System.String]$taskIds[0]
-
-            "TESTGUIDE_TASK_ID=$taskId" |
-              Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-            Write-Host ''
-            Write-Host "Task ID: $taskId"
-
+          if ($taskIds.Count -eq 0) {
+            throw 'Execution response did not contain taskIds.'
           }
-          else {
 
-            Write-Warning 'Execution response did not contain taskIds.'
+          $taskId = [System.String]$taskIds[0]
 
+          if (
+            [System.String]::IsNullOrWhiteSpace(
+              $taskId
+            )
+          ) {
+            throw 'Returned taskId is empty.'
           }
+
+          "TESTGUIDE_TASK_ID=$taskId" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          Write-Host ''
+          Write-Host "Task ID: $taskId"
 
           Write-Host '========================================'
           Write-Host 'TESTGUIDE EXECUTION SUBMITTED'
@@ -775,10 +770,10 @@ jobs:
 
 
       # ==========================================================
-      # 11. POLL TASK FIVE TIMES
+      # 11. POLL TASK UNTIL FINISHED
       # ==========================================================
 
-      - name: Poll TestGuide task
+      - name: Poll TestGuide task until finished
         if: env.TESTGUIDE_TASK_ID != ''
         shell: pwsh
         env:
@@ -797,11 +792,42 @@ jobs:
             'Accept' = 'application/json'
           }
 
-          Write-Host ''
-          Write-Host "Task ID  : $env:TESTGUIDE_TASK_ID"
-          Write-Host "Task URL : $taskUrl"
+          $pollIntervalSeconds = 10
+          $maximumPollingMinutes = 170
+          $deadline = (Get-Date).AddMinutes($maximumPollingMinutes)
 
-          for ($attempt = 1; $attempt -le 5; $attempt++) {
+          $successStates = @(
+            'FINISHED',
+            'COMPLETED',
+            'SUCCESS',
+            'SUCCEEDED'
+          )
+
+          $failureStates = @(
+            'ERROR',
+            'FAILED',
+            'ABORTED',
+            'CANCELLED',
+            'CANCELED'
+          )
+
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'POLL TESTGUIDE TASK'
+          Write-Host '========================================'
+          Write-Host "Task ID       : $env:TESTGUIDE_TASK_ID"
+          Write-Host "Project ID    : $env:ONECX_PROJECT_ID"
+          Write-Host "Poll interval : $pollIntervalSeconds seconds"
+          Write-Host "Maximum wait  : $maximumPollingMinutes minutes"
+          Write-Host '========================================'
+
+          $attempt = 0
+          $completed = $false
+          $task = $null
+
+          while ((Get-Date) -lt $deadline) {
+
+            $attempt++
 
             $task = Invoke-RestMethod `
               -Method GET `
@@ -809,58 +835,391 @@ jobs:
               -Headers $headers `
               -ErrorAction Stop
 
-            $state = [System.String]$task.state
+            $rawState = [System.String]$task.state
+            $state = $rawState.Trim().ToUpperInvariant()
 
-            Write-Host "Attempt ${attempt}/5: $state"
+            $stateInfo = [System.String]$task.stateInfo
+            $verdict = [System.String]$task.aggregatedVerdict
 
-            "FINAL_TASK_STATE=$state" |
-              Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Write-Host ''
+            Write-Host (
+              "Attempt $attempt | " +
+              "State: $rawState | " +
+              "Verdict: $verdict"
+            )
 
             if (
-              $state -in @(
-                'FINISHED',
-                'COMPLETED',
-                'SUCCESS',
-                'SUCCEEDED'
+              -not [System.String]::IsNullOrWhiteSpace(
+                $stateInfo
               )
             ) {
-
-              Write-Host 'TestGuide execution completed successfully.'
-              exit 0
-
+              Write-Host "State Info: $stateInfo"
             }
 
-            if (
-              $state -in @(
-                'ERROR',
-                'FAILED',
-                'ABORTED',
-                'CANCELLED',
-                'CANCELED'
-              )
-            ) {
+            if ($state -in $successStates) {
+
+              $completed = $true
 
               Write-Host ''
-              Write-Host 'TestGuide execution failed.'
+              Write-Host '========================================'
+              Write-Host 'TESTGUIDE TASK COMPLETED'
+              Write-Host '========================================'
 
               $task |
-                ConvertTo-Json -Depth 30 |
+                ConvertTo-Json -Depth 50 |
                 Write-Host
 
-              exit 1
+              break
             }
 
-            if ($attempt -lt 5) {
-              Start-Sleep -Seconds 10
+            if ($state -in $failureStates) {
+
+              Write-Host ''
+              Write-Host '========================================'
+              Write-Host 'TESTGUIDE TASK FAILED'
+              Write-Host '========================================'
+
+              $task |
+                ConvertTo-Json -Depth 50 |
+                Write-Host
+
+              throw (
+                "TestGuide task failed. State: $rawState. " +
+                "StateInfo: $stateInfo"
+              )
+            }
+
+            Start-Sleep -Seconds $pollIntervalSeconds
+          }
+
+          if (-not $completed) {
+            throw (
+              "TestGuide polling timed out after " +
+              "$maximumPollingMinutes minutes."
+            )
+          }
+
+          $finalState = [System.String]$task.state
+          $finalVerdict = [System.String]$task.aggregatedVerdict
+          $finalStateInfo = [System.String]$task.stateInfo
+          $taskStartDate = [System.String]$task.startDate
+          $taskEndDate = [System.String]$task.endDate
+
+          "FINAL_TASK_STATE=$finalState" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          "FINAL_TASK_STATE_INFO=$finalStateInfo" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          "FINAL_TASK_VERDICT=$finalVerdict" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          "TASK_START_DATE=$taskStartDate" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          "TASK_END_DATE=$taskEndDate" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          $taskResultFile = Join-Path `
+            $env:RUNNER_TEMP `
+            'testguide-task-result.json'
+
+          $task |
+            ConvertTo-Json -Depth 50 |
+            Set-Content `
+              -LiteralPath $taskResultFile `
+              -Encoding utf8
+
+          "TESTGUIDE_TASK_RESULT_FILE=$taskResultFile" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          Write-Host ''
+          Write-Host "Final state   : $finalState"
+          Write-Host "Final verdict : $finalVerdict"
+          Write-Host "Start date    : $taskStartDate"
+          Write-Host "End date      : $taskEndDate"
+
+
+      # ==========================================================
+      # 12. DISCOVER REPORT DEPOSITORY
+      # ==========================================================
+
+      - name: Discover TestGuide report depository
+        if: env.TESTGUIDE_TASK_ID != ''
+        shell: pwsh
+        env:
+          ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $headers = @{
+            'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
+            'Accept' = 'application/json'
+          }
+
+          $depositoriesUrl = (
+            "$env:ONECX_URL/api/artifact/depositories" +
+            "?projectId=$env:ONECX_PROJECT_ID" +
+            "&shared=false"
+          )
+
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'DISCOVER ARTIFACT DEPOSITORIES'
+          Write-Host '========================================'
+          Write-Host "Project ID: $env:ONECX_PROJECT_ID"
+          Write-Host "URL       : $depositoriesUrl"
+          Write-Host '========================================'
+
+          $depositories = @(
+            Invoke-RestMethod `
+              -Method GET `
+              -Uri $depositoriesUrl `
+              -Headers $headers `
+              -ErrorAction Stop
+          )
+
+          Write-Host ''
+          Write-Host 'Available depositories:'
+
+          foreach ($depository in $depositories) {
+
+            Write-Host (
+              "ID=$($depository.id) | " +
+              "Name=$($depository.name) | " +
+              "Project=$($depository.projectId)"
+            )
+          }
+
+          $reportDepositories = @(
+            $depositories |
+            Where-Object {
+              ([System.String]$_.name).Trim() -eq 'Report Artifacts'
+            }
+          )
+
+          if ($reportDepositories.Count -eq 0) {
+
+            $reportDepositories = @(
+              $depositories |
+              Where-Object {
+                ([System.String]$_.name) -match '(?i)report'
+              }
+            )
+          }
+
+          if ($reportDepositories.Count -eq 0) {
+            throw (
+              "No report depository found for project " +
+              "$env:ONECX_PROJECT_ID."
+            )
+          }
+
+          if ($reportDepositories.Count -gt 1) {
+
+            $ids = @(
+              $reportDepositories |
+              ForEach-Object {
+                $_.id
+              }
+            ) -join ', '
+
+            throw "Multiple report depositories found: $ids"
+          }
+
+          $depositoryId = [System.String]$reportDepositories[0].id
+
+          "REPORT_DEPOSITORY_ID=$depositoryId" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'REPORT DEPOSITORY SELECTED'
+          Write-Host '========================================'
+          Write-Host "ID   : $depositoryId"
+          Write-Host "Name : $($reportDepositories[0].name)"
+          Write-Host '========================================'
+
+
+      # ==========================================================
+      # 13. FIND REPORT ARTIFACT CANDIDATES
+      # ==========================================================
+
+      - name: Find matching report artifact candidates
+        if: env.REPORT_DEPOSITORY_ID != ''
+        shell: pwsh
+        env:
+          ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          if (
+            [System.String]::IsNullOrWhiteSpace(
+              $env:TASK_START_DATE
+            )
+          ) {
+            throw 'TASK_START_DATE is missing.'
+          }
+
+          if (
+            [System.String]::IsNullOrWhiteSpace(
+              $env:TASK_END_DATE
+            )
+          ) {
+            throw 'TASK_END_DATE is missing.'
+          }
+
+          $headers = @{
+            'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
+            'Accept' = 'application/json'
+          }
+
+          try {
+
+            $taskStart = [System.DateTimeOffset]::Parse(
+              $env:TASK_START_DATE,
+              [System.Globalization.CultureInfo]::InvariantCulture
+            )
+
+            $taskEnd = [System.DateTimeOffset]::Parse(
+              $env:TASK_END_DATE,
+              [System.Globalization.CultureInfo]::InvariantCulture
+            )
+
+          }
+          catch {
+
+            throw (
+              "Unable to parse task dates. " +
+              "Start=$env:TASK_START_DATE " +
+              "End=$env:TASK_END_DATE"
+            )
+          }
+
+          $searchStart = $taskStart.AddMinutes(-1)
+          $searchEnd = $taskEnd.AddMinutes(5)
+
+          $startText = $searchStart.UtcDateTime.ToString(
+            'yyyy-MM-ddTHH:mm:ss.fffZ'
+          )
+
+          $endText = $searchEnd.UtcDateTime.ToString(
+            'yyyy-MM-ddTHH:mm:ss.fffZ'
+          )
+
+          $encodedDepository = [System.Uri]::EscapeDataString(
+            $env:REPORT_DEPOSITORY_ID
+          )
+
+          $encodedStart = [System.Uri]::EscapeDataString(
+            $startText
+          )
+
+          $encodedEnd = [System.Uri]::EscapeDataString(
+            $endText
+          )
+
+          $artifactsUrl = (
+            "$env:ONECX_URL/api/artifact/artifacts" +
+            "?depositoryId=$encodedDepository" +
+            "&startDate=$encodedStart" +
+            "&endDate=$encodedEnd"
+          )
+
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'SEARCH REPORT ARTIFACTS'
+          Write-Host '========================================'
+          Write-Host "Depository : $env:REPORT_DEPOSITORY_ID"
+          Write-Host "Task ID    : $env:TESTGUIDE_TASK_ID"
+          Write-Host "Task start : $env:TASK_START_DATE"
+          Write-Host "Task end   : $env:TASK_END_DATE"
+          Write-Host "Search from: $startText"
+          Write-Host "Search to  : $endText"
+          Write-Host "URL        : $artifactsUrl"
+          Write-Host '========================================'
+
+          $artifacts = @(
+            Invoke-RestMethod `
+              -Method GET `
+              -Uri $artifactsUrl `
+              -Headers $headers `
+              -ErrorAction Stop
+          )
+
+          $artifactResultFile = Join-Path `
+            $env:RUNNER_TEMP `
+            'testguide-report-artifact-candidates.json'
+
+          $artifacts |
+            ConvertTo-Json -Depth 50 |
+            Set-Content `
+              -LiteralPath $artifactResultFile `
+              -Encoding utf8
+
+          "TESTGUIDE_ARTIFACT_CANDIDATES_FILE=$artifactResultFile" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          "REPORT_ARTIFACT_CANDIDATE_COUNT=$($artifacts.Count)" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'REPORT ARTIFACT CANDIDATES'
+          Write-Host '========================================'
+          Write-Host "Candidate count: $($artifacts.Count)"
+
+          if ($artifacts.Count -eq 0) {
+
+            Write-Warning (
+              'No report artifacts found for the execution window.'
+            )
+
+          }
+          else {
+
+            foreach ($artifact in $artifacts) {
+
+              Write-Host ''
+              Write-Host '----------------------------------------'
+              Write-Host "ID          : $($artifact.id)"
+              Write-Host "File Name   : $($artifact.fileName)"
+              Write-Host "Extension   : $($artifact.extension)"
+              Write-Host "File Size   : $($artifact.fileSize)"
+              Write-Host "Upload Date : $($artifact.uploadDate)"
+              Write-Host "Uploader    : $($artifact.uploader)"
+
+              foreach ($attribute in @($artifact.attributeList)) {
+
+                $values = @($attribute.values) -join ', '
+
+                Write-Host (
+                  "Attribute   : " +
+                  "$($attribute.key) = $values"
+                )
+              }
+
+              foreach ($share in @($artifact.shares)) {
+
+                if (
+                  -not [System.String]::IsNullOrWhiteSpace(
+                    [System.String]$share.link
+                  )
+                ) {
+                  Write-Host "Share Link  : $($share.link)"
+                }
+              }
             }
           }
 
           Write-Host ''
-          Write-Host "Task remains non-terminal after 5 attempts."
+          Write-Host '========================================'
+          Write-Host "Candidate JSON: $artifactResultFile"
+          Write-Host '========================================'
 
 
       # ==========================================================
-      # 12. SUMMARY
+      # 14. SUMMARY
       # ==========================================================
 
       - name: Publish execution summary
@@ -883,6 +1242,12 @@ jobs:
             "| Playbook Link | $env:TESTGUIDE_PLAYBOOK_LINK |",
             "| Task ID | $env:TESTGUIDE_TASK_ID |",
             "| Task State | $env:FINAL_TASK_STATE |",
+            "| Task State Info | $env:FINAL_TASK_STATE_INFO |",
+            "| Verdict | $env:FINAL_TASK_VERDICT |",
+            "| Task Start | $env:TASK_START_DATE |",
+            "| Task End | $env:TASK_END_DATE |",
+            "| Report Depository | $env:REPORT_DEPOSITORY_ID |",
+            "| Artifact Candidates | $env:REPORT_ARTIFACT_CANDIDATE_COUNT |",
             "| Workspace | $env:TESTGUIDE_ROOT |",
             "| TBC | $env:TBC_RELATIVE_PATH |",
             "| TCF | $env:TCF_RELATIVE_PATH |",
