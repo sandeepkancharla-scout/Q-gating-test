@@ -32,7 +32,6 @@ jobs:
       ONECX_PROJECT_ID: ${{ vars.ONECX_PROJECT_ID }}
 
       ONECX_REPORT_TEMPLATE_ID: '19'
-      ONECX_REPORT_TEMPLATE_TYPE: 'TEST_SUMMARY_REPORT'
 
     steps:
 
@@ -91,7 +90,7 @@ jobs:
 
 
       # ==========================================================
-      # 2. RESOLVE ONE.CX RESOURCE AND PATHS
+      # 2. RESOLVE RESOURCE AND BENCH PATHS
       # ==========================================================
 
       - name: Resolve ONE.CX resource and paths
@@ -202,10 +201,6 @@ jobs:
             "${configurationFolder}_TestConfig.tcf"
           )
 
-          # Example:
-          # Packages\system-hil\L2_Quality_Gate\
-          # VAS_FL\VAS_FL_L2QualityGate.prj
-
           $projectRelativePath = (
             "Packages\$benchPackage\L2_Quality_Gate\" +
             "$targetEcu\" +
@@ -239,17 +234,17 @@ jobs:
 
           Write-Host ''
           Write-Host '========================================'
-          Write-Host 'ONE.CX RESOURCE RESOLUTION'
+          Write-Host 'RESOURCE RESOLUTION'
           Write-Host '========================================'
-          Write-Host "Requested   : $requestedBench"
-          Write-Host "Resource    : $resourceName"
-          Write-Host "Workspace   : $workspaceRoot"
-          Write-Host "Identifier  : $xilIdentifier"
-          Write-Host "ecu.test    : $ecuTestStepName"
-          Write-Host "TBC         : $tbcRelativePath"
-          Write-Host "TCF         : $tcfRelativePath"
-          Write-Host "PRJ         : $projectRelativePath"
-          Write-Host "Full PRJ    : $fullProjectPath"
+          Write-Host "Requested  : $requestedBench"
+          Write-Host "Resource   : $resourceName"
+          Write-Host "Workspace  : $workspaceRoot"
+          Write-Host "Identifier : $xilIdentifier"
+          Write-Host "ecu.test   : $ecuTestStepName"
+          Write-Host "TBC        : $tbcRelativePath"
+          Write-Host "TCF        : $tcfRelativePath"
+          Write-Host "PRJ        : $projectRelativePath"
+          Write-Host "Full PRJ   : $fullProjectPath"
           Write-Host '========================================'
 
 
@@ -285,7 +280,7 @@ jobs:
 
 
       # ==========================================================
-      # 4. GENERATE AND VALIDATE PLAYBOOK
+      # 4. GENERATE PLAYBOOK
       # ==========================================================
 
       - name: Generate and validate playbook
@@ -373,10 +368,6 @@ jobs:
               -LiteralPath $playbookFile `
               -Encoding utf8
 
-          if (-not (Test-Path -LiteralPath $playbookFile)) {
-            throw 'Generated playbook file is missing.'
-          }
-
           $generatedPlaybook = Get-Content `
             -LiteralPath $playbookFile `
             -Raw |
@@ -390,28 +381,12 @@ jobs:
             $generatedPlaybook.execution.testcases[0].relativePath
           )
 
-          if (
-            [System.String]::IsNullOrWhiteSpace(
-              $actualIdentifier
-            )
-          ) {
-            throw 'Generated playbook XIL identifier is empty.'
-          }
-
           if ($actualIdentifier -ne $env:XIL_IDENTIFIER) {
-            throw (
-              'Generated playbook XIL identifier does not match. ' +
-              "Expected: $env:XIL_IDENTIFIER. " +
-              "Actual: $actualIdentifier."
-            )
+            throw 'Generated XIL identifier does not match.'
           }
 
           if ($actualProjectPath -ne $env:PROJECT_RELATIVE_PATH) {
-            throw (
-              'Generated playbook project path does not match. ' +
-              "Expected: $env:PROJECT_RELATIVE_PATH. " +
-              "Actual: $actualProjectPath."
-            )
+            throw 'Generated project path does not match.'
           }
 
           "TESTGUIDE_PLAYBOOK_FILE=$playbookFile" |
@@ -420,13 +395,6 @@ jobs:
           Write-Host ''
           Write-Host '========================================'
           Write-Host 'GENERATED PLAYBOOK'
-          Write-Host '========================================'
-          Write-Host "Workspace  : $env:TESTGUIDE_ROOT"
-          Write-Host "Resource   : $env:TESTGUIDE_RESOURCE"
-          Write-Host "Identifier : $actualIdentifier"
-          Write-Host "TBC        : $env:TBC_RELATIVE_PATH"
-          Write-Host "TCF        : $env:TCF_RELATIVE_PATH"
-          Write-Host "PRJ        : $actualProjectPath"
           Write-Host '========================================'
           Write-Host $playbookJson
           Write-Host '========================================'
@@ -468,17 +436,6 @@ jobs:
             -LiteralPath $env:TESTGUIDE_PLAYBOOK_FILE `
             -Raw
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'UPLOAD PLAYBOOK'
-          Write-Host '========================================'
-          Write-Host "URL        : $uploadUrl"
-          Write-Host "Project    : $env:ONECX_PROJECT_ID"
-          Write-Host "Resource   : $env:TESTGUIDE_RESOURCE"
-          Write-Host "Identifier : $env:XIL_IDENTIFIER"
-          Write-Host "PRJ        : $env:PROJECT_RELATIVE_PATH"
-          Write-Host '========================================'
-
           try {
 
             $response = Invoke-RestMethod `
@@ -492,33 +449,14 @@ jobs:
           }
           catch {
 
-            Write-Host ''
-            Write-Host '========================================'
             Write-Host 'PLAYBOOK UPLOAD FAILED'
-            Write-Host '========================================'
-            Write-Host "Exception: $($_.Exception.Message)"
-
-            if ($null -ne $_.Exception.Response) {
-              try {
-                Write-Host (
-                  "HTTP Status: " +
-                  [int]$_.Exception.Response.StatusCode
-                )
-              }
-              catch {
-                Write-Host 'HTTP status unavailable.'
-              }
-            }
+            Write-Host $_.Exception.Message
 
             if ($null -ne $_.ErrorDetails) {
-              Write-Host "Response body: $($_.ErrorDetails.Message)"
+              Write-Host $_.ErrorDetails.Message
             }
 
             throw
-          }
-
-          if ($null -eq $response) {
-            throw 'ONE.CX returned an empty upload response.'
           }
 
           $playbookId = [System.Convert]::ToString(
@@ -539,9 +477,7 @@ jobs:
           "TESTGUIDE_PLAYBOOK_LINK=$($response.playbookLink)" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-          Write-Host ''
-          Write-Host "Playbook ID   : $playbookId"
-          Write-Host "Playbook Link : $($response.playbookLink)"
+          Write-Host "Playbook ID: $playbookId"
 
 
       # ==========================================================
@@ -554,14 +490,6 @@ jobs:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
         run: |
           $ErrorActionPreference = 'Stop'
-
-          if (
-            [System.String]::IsNullOrWhiteSpace(
-              $env:TESTGUIDE_PLAYBOOK_ID
-            )
-          ) {
-            throw 'TESTGUIDE_PLAYBOOK_ID is missing.'
-          }
 
           $executeUrl = (
             "$env:ONECX_URL/api/v2/execution/playbook/" +
@@ -582,9 +510,7 @@ jobs:
 
           $executeRequest = [ordered]@{
             name = "$env:JIRA_KEY - $env:TARGET_ECU L2 Quality Gate"
-
             priority = 42
-
             parameters = @()
 
             additionalSettings = [ordered]@{
@@ -600,61 +526,16 @@ jobs:
             }
           }
 
-          $executeJson = $executeRequest |
-            ConvertTo-Json -Depth 20
-
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'EXECUTE PLAYBOOK'
-          Write-Host '========================================'
-          Write-Host "URL         : $executeUrl"
-          Write-Host "Playbook ID : $env:TESTGUIDE_PLAYBOOK_ID"
-          Write-Host "Resource    : $env:TESTGUIDE_RESOURCE"
-          Write-Host "Identifier  : $env:XIL_IDENTIFIER"
-          Write-Host "PRJ         : $env:PROJECT_RELATIVE_PATH"
-          Write-Host '========================================'
-
-          try {
-
-            $response = Invoke-RestMethod `
-              -Method POST `
-              -Uri $executeUrl `
-              -Headers $headers `
-              -ContentType 'application/json' `
-              -Body $executeJson `
-              -ErrorAction Stop
-
-          }
-          catch {
-
-            Write-Host ''
-            Write-Host '========================================'
-            Write-Host 'PLAYBOOK EXECUTION FAILED'
-            Write-Host '========================================'
-            Write-Host "Exception: $($_.Exception.Message)"
-
-            if ($null -ne $_.Exception.Response) {
-              try {
-                Write-Host (
-                  "HTTP Status: " +
-                  [int]$_.Exception.Response.StatusCode
-                )
-              }
-              catch {
-                Write-Host 'HTTP status unavailable.'
-              }
-            }
-
-            if ($null -ne $_.ErrorDetails) {
-              Write-Host "Response body: $($_.ErrorDetails.Message)"
-            }
-
-            throw
-          }
-
-          $response |
-            ConvertTo-Json -Depth 30 |
-            Write-Host
+          $response = Invoke-RestMethod `
+            -Method POST `
+            -Uri $executeUrl `
+            -Headers $headers `
+            -ContentType 'application/json' `
+            -Body (
+              $executeRequest |
+              ConvertTo-Json -Depth 20
+            ) `
+            -ErrorAction Stop
 
           $taskIds = @($response.taskIds)
 
@@ -681,7 +562,7 @@ jobs:
 
 
       # ==========================================================
-      # 7. POLL EXECUTION
+      # 7. POLL EXECUTION TASK
       # ==========================================================
 
       - name: Poll execution task
@@ -719,9 +600,9 @@ jobs:
             'CANCELED'
           )
 
-          $blockedSince = $null
           $attempt = 0
           $task = $null
+          $blockedSince = $null
 
           while ((Get-Date) -lt $deadline) {
 
@@ -769,30 +650,23 @@ jobs:
             if ($state -eq 'BLOCKED') {
 
               if ($null -eq $blockedSince) {
-
                 $blockedSince = Get-Date
-
-                Write-Warning (
-                  'Execution is BLOCKED. Waiting up to ' +
-                  '5 minutes for a matching resource.'
-                )
               }
 
-              $blockedMinutes = (
-                (Get-Date) - $blockedSince
-              ).TotalMinutes
-
-              if ($blockedMinutes -ge 5) {
+              if (
+                (
+                  (Get-Date) - $blockedSince
+                ).TotalMinutes -ge 5
+              ) {
                 throw (
                   'Execution remained BLOCKED for 5 minutes. ' +
-                  'Check ONE.CX resource identifier: ' +
+                  'Check resource identifier: ' +
                   $env:XIL_IDENTIFIER
                 )
               }
 
             }
             else {
-
               $blockedSince = $null
             }
 
@@ -800,7 +674,7 @@ jobs:
           }
 
           if ($null -eq $task) {
-            throw 'No task response was received.'
+            throw 'No execution task response was received.'
           }
 
           $finalState = (
@@ -833,7 +707,20 @@ jobs:
 
 
       # ==========================================================
-      # 8. START PDF REPORT
+      # 8. START PDF REPORT GENERATION
+      #
+      # Swagger-confirmed body:
+      #
+      # {
+      #   "parameters": [
+      #     {
+      #       "name": "includeReviews",
+      #       "value": true
+      #     }
+      #   ],
+      #   "dType": "COVERAGE_FILTER",
+      #   "taskId": 2606
+      # }
       # ==========================================================
 
       - name: Start PDF report generation
@@ -890,8 +777,16 @@ jobs:
           }
 
           $reportRequest = [ordered]@{
-            parameters = @()
-            type = $env:ONECX_REPORT_TEMPLATE_TYPE
+
+            parameters = @(
+              [ordered]@{
+                name = 'includeReviews'
+                value = $true
+              }
+            )
+
+            dType = 'COVERAGE_FILTER'
+
             taskId = $executionTaskId
           }
 
@@ -904,8 +799,11 @@ jobs:
           Write-Host '========================================'
           Write-Host "Execution Task : $executionTaskId"
           Write-Host "Template       : $env:ONECX_REPORT_TEMPLATE_ID"
+          Write-Host "dType          : COVERAGE_FILTER"
           Write-Host "Report         : $reportBaseName"
           Write-Host "URL            : $exportUrl"
+          Write-Host 'Request Body:'
+          Write-Host $reportJson
           Write-Host '========================================'
 
           try {
@@ -940,10 +838,23 @@ jobs:
             }
 
             if ($null -ne $_.ErrorDetails) {
-              Write-Host "Response body: $($_.ErrorDetails.Message)"
+              Write-Host 'Response body:'
+              Write-Host $_.ErrorDetails.Message
             }
 
             throw
+          }
+
+          Write-Host ''
+          Write-Host 'Report generation response:'
+
+          if ($response -is [System.String]) {
+            Write-Host $response
+          }
+          else {
+            $response |
+              ConvertTo-Json -Depth 30 |
+              Write-Host
           }
 
           $reportTaskId = $null
@@ -1007,6 +918,7 @@ jobs:
           "TESTGUIDE_REPORT_FILE=$reportFile" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+          Write-Host ''
           Write-Host "Report Task ID: $reportTaskId"
           Write-Host "Report File   : $reportFile"
 
@@ -1120,8 +1032,7 @@ jobs:
             ).ToUpperInvariant()
 
             Write-Host (
-              "Attempt $attempt | " +
-              "Report State=$state"
+              "Attempt $attempt | Report State=$state"
             )
 
             if ($state -in $successfulStates) {
@@ -1147,7 +1058,7 @@ jobs:
 
 
       # ==========================================================
-      # 10. DOWNLOAD PDF
+      # 10. DOWNLOAD PDF REPORT
       # ==========================================================
 
       - name: Download PDF report
@@ -1171,50 +1082,12 @@ jobs:
             'Accept' = 'application/pdf'
           }
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'DOWNLOAD TEST SUMMARY REPORT'
-          Write-Host '========================================'
-          Write-Host "URL  : $downloadUrl"
-          Write-Host "File : $env:TESTGUIDE_REPORT_FILE"
-          Write-Host '========================================'
-
-          try {
-
-            Invoke-WebRequest `
-              -Method GET `
-              -Uri $downloadUrl `
-              -Headers $headers `
-              -OutFile $env:TESTGUIDE_REPORT_FILE `
-              -ErrorAction Stop
-
-          }
-          catch {
-
-            Write-Host ''
-            Write-Host '========================================'
-            Write-Host 'REPORT DOWNLOAD FAILED'
-            Write-Host '========================================'
-            Write-Host "Exception: $($_.Exception.Message)"
-
-            if ($null -ne $_.Exception.Response) {
-              try {
-                Write-Host (
-                  "HTTP Status: " +
-                  [int]$_.Exception.Response.StatusCode
-                )
-              }
-              catch {
-                Write-Host 'HTTP status unavailable.'
-              }
-            }
-
-            if ($null -ne $_.ErrorDetails) {
-              Write-Host "Response body: $($_.ErrorDetails.Message)"
-            }
-
-            throw
-          }
+          Invoke-WebRequest `
+            -Method GET `
+            -Uri $downloadUrl `
+            -Headers $headers `
+            -OutFile $env:TESTGUIDE_REPORT_FILE `
+            -ErrorAction Stop
 
           if (
             -not (
@@ -1297,6 +1170,7 @@ jobs:
             "| Execution State | $env:FINAL_TASK_STATE |",
             "| State Info | $env:FINAL_TASK_STATE_INFO |",
             "| Verdict | $env:FINAL_TASK_VERDICT |",
+            "| Report dType | COVERAGE_FILTER |",
             "| Report Task | $env:TESTGUIDE_REPORT_TASK_ID |",
             "| Report State | $env:TESTGUIDE_REPORT_STATE |",
             "| Report File | $env:TESTGUIDE_REPORT_FILE |",
