@@ -202,14 +202,13 @@ jobs:
             "${configurationFolder}_TestConfig.tcf"
           )
 
-          # IMPORTANT:
-          # L2_Quality_Gate is an actual folder under the bench package.
-          #
           # Example:
-          # Packages\system-hil\L2_Quality_Gate\VAS_FL_L2QualityGate.prj
+          # Packages\system-hil\L2_Quality_Gate\
+          # VAS_FL\VAS_FL_L2QualityGate.prj
 
           $projectRelativePath = (
             "Packages\$benchPackage\L2_Quality_Gate\" +
+            "$targetEcu\" +
             "${targetEcu}_L2QualityGate.prj"
           )
 
@@ -234,6 +233,10 @@ jobs:
           "PROJECT_RELATIVE_PATH=$projectRelativePath" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+          $fullProjectPath = Join-Path `
+            $workspaceRoot `
+            $projectRelativePath
+
           Write-Host ''
           Write-Host '========================================'
           Write-Host 'ONE.CX RESOURCE RESOLUTION'
@@ -246,11 +249,6 @@ jobs:
           Write-Host "TBC         : $tbcRelativePath"
           Write-Host "TCF         : $tcfRelativePath"
           Write-Host "PRJ         : $projectRelativePath"
-
-          $fullProjectPath = Join-Path `
-            $workspaceRoot `
-            $projectRelativePath
-
           Write-Host "Full PRJ    : $fullProjectPath"
           Write-Host '========================================'
 
@@ -388,6 +386,10 @@ jobs:
             $generatedPlaybook.xilConfigRequirements[0].value
           )
 
+          $actualProjectPath = [System.Convert]::ToString(
+            $generatedPlaybook.execution.testcases[0].relativePath
+          )
+
           if (
             [System.String]::IsNullOrWhiteSpace(
               $actualIdentifier
@@ -404,13 +406,9 @@ jobs:
             )
           }
 
-          $actualProjectPath = [System.Convert]::ToString(
-            $generatedPlaybook.execution.testcases[0].relativePath
-          )
-
           if ($actualProjectPath -ne $env:PROJECT_RELATIVE_PATH) {
             throw (
-              'Generated project path does not match. ' +
+              'Generated playbook project path does not match. ' +
               "Expected: $env:PROJECT_RELATIVE_PATH. " +
               "Actual: $actualProjectPath."
             )
@@ -482,6 +480,7 @@ jobs:
           Write-Host '========================================'
 
           try {
+
             $response = Invoke-RestMethod `
               -Method POST `
               -Uri $uploadUrl `
@@ -489,8 +488,10 @@ jobs:
               -ContentType 'application/json' `
               -Body $body `
               -ErrorAction Stop
+
           }
           catch {
+
             Write-Host ''
             Write-Host '========================================'
             Write-Host 'PLAYBOOK UPLOAD FAILED'
@@ -581,7 +582,9 @@ jobs:
 
           $executeRequest = [ordered]@{
             name = "$env:JIRA_KEY - $env:TARGET_ECU L2 Quality Gate"
+
             priority = 42
+
             parameters = @()
 
             additionalSettings = [ordered]@{
@@ -612,6 +615,7 @@ jobs:
           Write-Host '========================================'
 
           try {
+
             $response = Invoke-RestMethod `
               -Method POST `
               -Uri $executeUrl `
@@ -619,13 +623,27 @@ jobs:
               -ContentType 'application/json' `
               -Body $executeJson `
               -ErrorAction Stop
+
           }
           catch {
+
             Write-Host ''
             Write-Host '========================================'
             Write-Host 'PLAYBOOK EXECUTION FAILED'
             Write-Host '========================================'
             Write-Host "Exception: $($_.Exception.Message)"
+
+            if ($null -ne $_.Exception.Response) {
+              try {
+                Write-Host (
+                  "HTTP Status: " +
+                  [int]$_.Exception.Response.StatusCode
+                )
+              }
+              catch {
+                Write-Host 'HTTP status unavailable.'
+              }
+            }
 
             if ($null -ne $_.ErrorDetails) {
               Write-Host "Response body: $($_.ErrorDetails.Message)"
@@ -663,7 +681,7 @@ jobs:
 
 
       # ==========================================================
-      # 7. POLL EXECUTION TASK
+      # 7. POLL EXECUTION
       # ==========================================================
 
       - name: Poll execution task
@@ -706,6 +724,7 @@ jobs:
           $task = $null
 
           while ((Get-Date) -lt $deadline) {
+
             $attempt++
 
             $task = Invoke-RestMethod `
@@ -715,7 +734,9 @@ jobs:
               -ErrorAction Stop
 
             $state = (
-              [System.Convert]::ToString($task.state)
+              [System.Convert]::ToString(
+                $task.state
+              )
             ).Trim().ToUpperInvariant()
 
             $stateInfo = [System.Convert]::ToString(
@@ -746,7 +767,9 @@ jobs:
             }
 
             if ($state -eq 'BLOCKED') {
+
               if ($null -eq $blockedSince) {
+
                 $blockedSince = Get-Date
 
                 Write-Warning (
@@ -766,8 +789,10 @@ jobs:
                   $env:XIL_IDENTIFIER
                 )
               }
+
             }
             else {
+
               $blockedSince = $null
             }
 
@@ -779,7 +804,9 @@ jobs:
           }
 
           $finalState = (
-            [System.Convert]::ToString($task.state)
+            [System.Convert]::ToString(
+              $task.state
+            )
           ).Trim().ToUpperInvariant()
 
           if ($finalState -notin $successfulStates) {
@@ -806,7 +833,7 @@ jobs:
 
 
       # ==========================================================
-      # 8. START PDF REPORT GENERATION
+      # 8. START PDF REPORT
       # ==========================================================
 
       - name: Start PDF report generation
@@ -871,35 +898,84 @@ jobs:
           $reportJson = $reportRequest |
             ConvertTo-Json -Depth 10
 
-          $response = Invoke-RestMethod `
-            -Method POST `
-            -Uri $exportUrl `
-            -Headers $headers `
-            -ContentType 'application/json' `
-            -Body $reportJson `
-            -ErrorAction Stop
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'GENERATE TEST SUMMARY REPORT'
+          Write-Host '========================================'
+          Write-Host "Execution Task : $executionTaskId"
+          Write-Host "Template       : $env:ONECX_REPORT_TEMPLATE_ID"
+          Write-Host "Report         : $reportBaseName"
+          Write-Host "URL            : $exportUrl"
+          Write-Host '========================================'
+
+          try {
+
+            $response = Invoke-RestMethod `
+              -Method POST `
+              -Uri $exportUrl `
+              -Headers $headers `
+              -ContentType 'application/json' `
+              -Body $reportJson `
+              -ErrorAction Stop
+
+          }
+          catch {
+
+            Write-Host ''
+            Write-Host '========================================'
+            Write-Host 'REPORT GENERATION REQUEST FAILED'
+            Write-Host '========================================'
+            Write-Host "Exception: $($_.Exception.Message)"
+
+            if ($null -ne $_.Exception.Response) {
+              try {
+                Write-Host (
+                  "HTTP Status: " +
+                  [int]$_.Exception.Response.StatusCode
+                )
+              }
+              catch {
+                Write-Host 'HTTP status unavailable.'
+              }
+            }
+
+            if ($null -ne $_.ErrorDetails) {
+              Write-Host "Response body: $($_.ErrorDetails.Message)"
+            }
+
+            throw
+          }
 
           $reportTaskId = $null
 
           if ($response -is [System.String]) {
+
             $reportTaskId = [System.String]$response
+
           }
           elseif ($null -ne $response.taskId) {
+
             $reportTaskId = [System.Convert]::ToString(
               $response.taskId
             )
+
           }
           elseif ($null -ne $response.id) {
+
             $reportTaskId = [System.Convert]::ToString(
               $response.id
             )
+
           }
           elseif ($null -ne $response.exportTaskId) {
+
             $reportTaskId = [System.Convert]::ToString(
               $response.exportTaskId
             )
+
           }
           elseif ($null -ne $response.reportTaskId) {
+
             $reportTaskId = [System.Convert]::ToString(
               $response.reportTaskId
             )
@@ -910,7 +986,10 @@ jobs:
               $reportTaskId
             )
           ) {
-            throw 'Reporting API did not return a report task ID.'
+            throw (
+              'Reporting API did not return a ' +
+              'report task ID.'
+            )
           }
 
           $reportTaskId = $reportTaskId.Trim().Trim('"')
@@ -929,6 +1008,7 @@ jobs:
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
           Write-Host "Report Task ID: $reportTaskId"
+          Write-Host "Report File   : $reportFile"
 
 
       # ==========================================================
@@ -981,6 +1061,7 @@ jobs:
           $attempt = 0
 
           while ((Get-Date) -lt $deadline) {
+
             $attempt++
 
             $response = Invoke-RestMethod `
@@ -992,29 +1073,40 @@ jobs:
             $rawState = ''
 
             if ($response -is [System.String]) {
+
               $rawState = [System.String]$response
+
             }
             elseif ($null -ne $response.state) {
+
               $rawState = [System.Convert]::ToString(
                 $response.state
               )
+
             }
             elseif ($null -ne $response.status) {
+
               $rawState = [System.Convert]::ToString(
                 $response.status
               )
+
             }
             elseif ($null -ne $response.statusKey) {
+
               $rawState = [System.Convert]::ToString(
                 $response.statusKey
               )
+
             }
             elseif ($null -ne $response.key) {
+
               $rawState = [System.Convert]::ToString(
                 $response.key
               )
+
             }
             elseif ($null -ne $response.finished) {
+
               if ([System.Boolean]$response.finished) {
                 $rawState = 'FINISHED'
               }
@@ -1028,7 +1120,8 @@ jobs:
             ).ToUpperInvariant()
 
             Write-Host (
-              "Attempt $attempt | Report State=$state"
+              "Attempt $attempt | " +
+              "Report State=$state"
             )
 
             if ($state -in $successfulStates) {
@@ -1054,7 +1147,7 @@ jobs:
 
 
       # ==========================================================
-      # 10. DOWNLOAD PDF REPORT
+      # 10. DOWNLOAD PDF
       # ==========================================================
 
       - name: Download PDF report
@@ -1078,12 +1171,50 @@ jobs:
             'Accept' = 'application/pdf'
           }
 
-          Invoke-WebRequest `
-            -Method GET `
-            -Uri $downloadUrl `
-            -Headers $headers `
-            -OutFile $env:TESTGUIDE_REPORT_FILE `
-            -ErrorAction Stop
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'DOWNLOAD TEST SUMMARY REPORT'
+          Write-Host '========================================'
+          Write-Host "URL  : $downloadUrl"
+          Write-Host "File : $env:TESTGUIDE_REPORT_FILE"
+          Write-Host '========================================'
+
+          try {
+
+            Invoke-WebRequest `
+              -Method GET `
+              -Uri $downloadUrl `
+              -Headers $headers `
+              -OutFile $env:TESTGUIDE_REPORT_FILE `
+              -ErrorAction Stop
+
+          }
+          catch {
+
+            Write-Host ''
+            Write-Host '========================================'
+            Write-Host 'REPORT DOWNLOAD FAILED'
+            Write-Host '========================================'
+            Write-Host "Exception: $($_.Exception.Message)"
+
+            if ($null -ne $_.Exception.Response) {
+              try {
+                Write-Host (
+                  "HTTP Status: " +
+                  [int]$_.Exception.Response.StatusCode
+                )
+              }
+              catch {
+                Write-Host 'HTTP status unavailable.'
+              }
+            }
+
+            if ($null -ne $_.ErrorDetails) {
+              Write-Host "Response body: $($_.ErrorDetails.Message)"
+            }
+
+            throw
+          }
 
           if (
             -not (
