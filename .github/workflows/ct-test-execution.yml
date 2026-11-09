@@ -103,6 +103,7 @@ jobs:
           $bench = $requestedBench.ToUpperInvariant()
 
           switch ($bench) {
+
             { $_ -in @('SYSHIL1', 'SYSHIL1-LABTEST1') } {
               $resourceName = 'syshil1-labtest1'
               $workspaceRoot = 'D:\HIL\Testing\eeint-Test-Automation'
@@ -201,8 +202,14 @@ jobs:
             "${configurationFolder}_TestConfig.tcf"
           )
 
+          # IMPORTANT:
+          # L2_Quality_Gate is an actual folder under the bench package.
+          #
+          # Example:
+          # Packages\system-hil\L2_Quality_Gate\VAS_FL_L2QualityGate.prj
+
           $projectRelativePath = (
-            "Packages\$benchPackage\" +
+            "Packages\$benchPackage\L2_Quality_Gate\" +
             "${targetEcu}_L2QualityGate.prj"
           )
 
@@ -239,6 +246,12 @@ jobs:
           Write-Host "TBC         : $tbcRelativePath"
           Write-Host "TCF         : $tcfRelativePath"
           Write-Host "PRJ         : $projectRelativePath"
+
+          $fullProjectPath = Join-Path `
+            $workspaceRoot `
+            $projectRelativePath
+
+          Write-Host "Full PRJ    : $fullProjectPath"
           Write-Host '========================================'
 
 
@@ -283,6 +296,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           $playbook = [ordered]@{
+
             metadata = [ordered]@{
               name = $env:PLAYBOOK_NAME
               taskNameTemplate = '${playbook_name} (${playbook_datetime}) ${distribution_count}'
@@ -300,6 +314,7 @@ jobs:
 
             setup = [ordered]@{
               steps = @(
+
                 [ordered]@{
                   reuse = 'always'
                   keepConfiguration = $false
@@ -319,6 +334,7 @@ jobs:
 
             execution = [ordered]@{
               testcases = @(
+
                 [ordered]@{
                   relativePath = $env:PROJECT_RELATIVE_PATH
                   stepName = $env:ECUTEST_STEP_NAME
@@ -388,16 +404,16 @@ jobs:
             )
           }
 
-          $actualWorkspace = [System.Convert]::ToString(
-            $generatedPlaybook.workspace.source.path
+          $actualProjectPath = [System.Convert]::ToString(
+            $generatedPlaybook.execution.testcases[0].relativePath
           )
 
-          if (
-            [System.String]::IsNullOrWhiteSpace(
-              $actualWorkspace
+          if ($actualProjectPath -ne $env:PROJECT_RELATIVE_PATH) {
+            throw (
+              'Generated project path does not match. ' +
+              "Expected: $env:PROJECT_RELATIVE_PATH. " +
+              "Actual: $actualProjectPath."
             )
-          ) {
-            throw 'Generated playbook workspace path is empty.'
           }
 
           "TESTGUIDE_PLAYBOOK_FILE=$playbookFile" |
@@ -407,12 +423,12 @@ jobs:
           Write-Host '========================================'
           Write-Host 'GENERATED PLAYBOOK'
           Write-Host '========================================'
-          Write-Host "Workspace  : $actualWorkspace"
+          Write-Host "Workspace  : $env:TESTGUIDE_ROOT"
           Write-Host "Resource   : $env:TESTGUIDE_RESOURCE"
           Write-Host "Identifier : $actualIdentifier"
           Write-Host "TBC        : $env:TBC_RELATIVE_PATH"
           Write-Host "TCF        : $env:TCF_RELATIVE_PATH"
-          Write-Host "PRJ        : $env:PROJECT_RELATIVE_PATH"
+          Write-Host "PRJ        : $actualProjectPath"
           Write-Host '========================================'
           Write-Host $playbookJson
           Write-Host '========================================'
@@ -462,6 +478,7 @@ jobs:
           Write-Host "Project    : $env:ONECX_PROJECT_ID"
           Write-Host "Resource   : $env:TESTGUIDE_RESOURCE"
           Write-Host "Identifier : $env:XIL_IDENTIFIER"
+          Write-Host "PRJ        : $env:PROJECT_RELATIVE_PATH"
           Write-Host '========================================'
 
           try {
@@ -591,6 +608,7 @@ jobs:
           Write-Host "Playbook ID : $env:TESTGUIDE_PLAYBOOK_ID"
           Write-Host "Resource    : $env:TESTGUIDE_RESOURCE"
           Write-Host "Identifier  : $env:XIL_IDENTIFIER"
+          Write-Host "PRJ         : $env:PROJECT_RELATIVE_PATH"
           Write-Host '========================================'
 
           try {
@@ -609,27 +627,12 @@ jobs:
             Write-Host '========================================'
             Write-Host "Exception: $($_.Exception.Message)"
 
-            if ($null -ne $_.Exception.Response) {
-              try {
-                Write-Host (
-                  "HTTP Status: " +
-                  [int]$_.Exception.Response.StatusCode
-                )
-              }
-              catch {
-                Write-Host 'HTTP status unavailable.'
-              }
-            }
-
             if ($null -ne $_.ErrorDetails) {
               Write-Host "Response body: $($_.ErrorDetails.Message)"
             }
 
             throw
           }
-
-          Write-Host ''
-          Write-Host 'Execution response:'
 
           $response |
             ConvertTo-Json -Depth 30 |
@@ -656,7 +659,6 @@ jobs:
           "TESTGUIDE_TASK_ID=$taskId" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-          Write-Host ''
           Write-Host "Execution Task ID: $taskId"
 
 
@@ -702,15 +704,6 @@ jobs:
           $blockedSince = $null
           $attempt = 0
           $task = $null
-
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'POLL EXECUTION TASK'
-          Write-Host '========================================'
-          Write-Host "Task ID    : $env:TESTGUIDE_TASK_ID"
-          Write-Host "Resource   : $env:TESTGUIDE_RESOURCE"
-          Write-Host "Identifier : $env:XIL_IDENTIFIER"
-          Write-Host '========================================'
 
           while ((Get-Date) -lt $deadline) {
             $attempt++
@@ -811,14 +804,6 @@ jobs:
           "TASK_END_DATE=$($task.endDate)" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'EXECUTION COMPLETED'
-          Write-Host '========================================'
-          Write-Host "State   : $($task.state)"
-          Write-Host "Verdict : $($task.aggregatedVerdict)"
-          Write-Host '========================================'
-
 
       # ==========================================================
       # 8. START PDF REPORT GENERATION
@@ -886,50 +871,13 @@ jobs:
           $reportJson = $reportRequest |
             ConvertTo-Json -Depth 10
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'GENERATE TEST SUMMARY REPORT'
-          Write-Host '========================================'
-          Write-Host "Execution Task : $executionTaskId"
-          Write-Host "Template       : $env:ONECX_REPORT_TEMPLATE_ID"
-          Write-Host "Report         : $reportBaseName"
-          Write-Host "URL            : $exportUrl"
-          Write-Host '========================================'
-
-          try {
-            $response = Invoke-RestMethod `
-              -Method POST `
-              -Uri $exportUrl `
-              -Headers $headers `
-              -ContentType 'application/json' `
-              -Body $reportJson `
-              -ErrorAction Stop
-          }
-          catch {
-            Write-Host ''
-            Write-Host '========================================'
-            Write-Host 'REPORT GENERATION REQUEST FAILED'
-            Write-Host '========================================'
-            Write-Host "Exception: $($_.Exception.Message)"
-
-            if ($null -ne $_.Exception.Response) {
-              try {
-                Write-Host (
-                  "HTTP Status: " +
-                  [int]$_.Exception.Response.StatusCode
-                )
-              }
-              catch {
-                Write-Host 'HTTP status unavailable.'
-              }
-            }
-
-            if ($null -ne $_.ErrorDetails) {
-              Write-Host "Response body: $($_.ErrorDetails.Message)"
-            }
-
-            throw
-          }
+          $response = Invoke-RestMethod `
+            -Method POST `
+            -Uri $exportUrl `
+            -Headers $headers `
+            -ContentType 'application/json' `
+            -Body $reportJson `
+            -ErrorAction Stop
 
           $reportTaskId = $null
 
@@ -962,10 +910,7 @@ jobs:
               $reportTaskId
             )
           ) {
-            throw (
-              'Reporting API did not return a ' +
-              'report task ID.'
-            )
+            throw 'Reporting API did not return a report task ID.'
           }
 
           $reportTaskId = $reportTaskId.Trim().Trim('"')
@@ -983,9 +928,7 @@ jobs:
           "TESTGUIDE_REPORT_FILE=$reportFile" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-          Write-Host ''
           Write-Host "Report Task ID: $reportTaskId"
-          Write-Host "Report File   : $reportFile"
 
 
       # ==========================================================
@@ -1085,8 +1028,7 @@ jobs:
             ).ToUpperInvariant()
 
             Write-Host (
-              "Attempt $attempt | " +
-              "Report State=$state"
+              "Attempt $attempt | Report State=$state"
             )
 
             if ($state -in $successfulStates) {
@@ -1136,47 +1078,12 @@ jobs:
             'Accept' = 'application/pdf'
           }
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'DOWNLOAD TEST SUMMARY REPORT'
-          Write-Host '========================================'
-          Write-Host "URL  : $downloadUrl"
-          Write-Host "File : $env:TESTGUIDE_REPORT_FILE"
-          Write-Host '========================================'
-
-          try {
-            Invoke-WebRequest `
-              -Method GET `
-              -Uri $downloadUrl `
-              -Headers $headers `
-              -OutFile $env:TESTGUIDE_REPORT_FILE `
-              -ErrorAction Stop
-          }
-          catch {
-            Write-Host ''
-            Write-Host '========================================'
-            Write-Host 'REPORT DOWNLOAD FAILED'
-            Write-Host '========================================'
-            Write-Host "Exception: $($_.Exception.Message)"
-
-            if ($null -ne $_.Exception.Response) {
-              try {
-                Write-Host (
-                  "HTTP Status: " +
-                  [int]$_.Exception.Response.StatusCode
-                )
-              }
-              catch {
-                Write-Host 'HTTP status unavailable.'
-              }
-            }
-
-            if ($null -ne $_.ErrorDetails) {
-              Write-Host "Response body: $($_.ErrorDetails.Message)"
-            }
-
-            throw
-          }
+          Invoke-WebRequest `
+            -Method GET `
+            -Uri $downloadUrl `
+            -Headers $headers `
+            -OutFile $env:TESTGUIDE_REPORT_FILE `
+            -ErrorAction Stop
 
           if (
             -not (
