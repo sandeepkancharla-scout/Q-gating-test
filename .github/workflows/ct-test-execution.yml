@@ -19,6 +19,10 @@ jobs:
       cancel-in-progress: false
 
     env:
+      # ==========================================================
+      # JIRA INPUTS
+      # ==========================================================
+
       JIRA_KEY: ${{ github.event.client_payload.jira_key }}
       BENCH_ID: ${{ github.event.client_payload.bench_id }}
       BENCH_NAME: ${{ github.event.client_payload.bench_name }}
@@ -26,12 +30,27 @@ jobs:
       TEST_CASES: ${{ github.event.client_payload.test_cases }}
       PLAYBOOK_NAME: ${{ github.event.client_payload.playbook_name }}
 
+      # ==========================================================
+      # TEST CONFIGURATION
+      # ==========================================================
+
       CONFIGURATION_FOLDER: 'SUBSYS1'
+
+      # ==========================================================
+      # ONE.CX
+      # ==========================================================
 
       ONECX_URL: 'https://testguide-ssp.onecx.vwgroup.com'
       ONECX_PROJECT_ID: ${{ vars.ONECX_PROJECT_ID }}
 
-      ONECX_REPORT_TEMPLATE_ID: '19'
+      # ==========================================================
+      # COVERAGE
+      # ==========================================================
+
+      ONECX_COVERAGE_FILTER_UUID: ${{ vars.ONECX_COVERAGE_FILTER_UUID }}
+
+      # Template 20 = Default Test Coverage Report
+      ONECX_COVERAGE_TEMPLATE_ID: '20'
 
     steps:
 
@@ -52,9 +71,11 @@ jobs:
             TEST_CASES = $env:TEST_CASES
             PLAYBOOK_NAME = $env:PLAYBOOK_NAME
             ONECX_PROJECT_ID = $env:ONECX_PROJECT_ID
+            ONECX_COVERAGE_FILTER_UUID = $env:ONECX_COVERAGE_FILTER_UUID
           }
 
           foreach ($item in $requiredValues.GetEnumerator()) {
+
             if (
               [System.String]::IsNullOrWhiteSpace(
                 [System.String]$item.Value
@@ -75,6 +96,17 @@ jobs:
             throw 'ONECX_PROJECT_ID must be an integer.'
           }
 
+          $coverageUuid = [System.Guid]::Empty
+
+          if (
+            -not [System.Guid]::TryParse(
+              $env:ONECX_COVERAGE_FILTER_UUID,
+              [ref]$coverageUuid
+            )
+          ) {
+            throw 'ONECX_COVERAGE_FILTER_UUID must be a valid UUID.'
+          }
+
           Write-Host ''
           Write-Host '========================================'
           Write-Host 'JIRA EXECUTION REQUEST'
@@ -90,7 +122,7 @@ jobs:
 
 
       # ==========================================================
-      # 2. RESOLVE RESOURCE AND BENCH PATHS
+      # 2. RESOLVE RESOURCE AND PATHS
       # ==========================================================
 
       - name: Resolve ONE.CX resource and paths
@@ -228,23 +260,16 @@ jobs:
           "PROJECT_RELATIVE_PATH=$projectRelativePath" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-          $fullProjectPath = Join-Path `
-            $workspaceRoot `
-            $projectRelativePath
-
           Write-Host ''
           Write-Host '========================================'
           Write-Host 'RESOURCE RESOLUTION'
           Write-Host '========================================'
-          Write-Host "Requested  : $requestedBench"
           Write-Host "Resource   : $resourceName"
           Write-Host "Workspace  : $workspaceRoot"
           Write-Host "Identifier : $xilIdentifier"
-          Write-Host "ecu.test   : $ecuTestStepName"
           Write-Host "TBC        : $tbcRelativePath"
           Write-Host "TCF        : $tcfRelativePath"
           Write-Host "PRJ        : $projectRelativePath"
-          Write-Host "Full PRJ   : $fullProjectPath"
           Write-Host '========================================'
 
 
@@ -276,14 +301,12 @@ jobs:
           "NORMALIZED_TEST_CASES=$normalized" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-          Write-Host "Test Cases: $normalized"
-
 
       # ==========================================================
       # 4. GENERATE PLAYBOOK
       # ==========================================================
 
-      - name: Generate and validate playbook
+      - name: Generate TestGuide playbook
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -297,6 +320,7 @@ jobs:
             }
 
             workspace = [ordered]@{
+
               source = [ordered]@{
                 path = $env:TESTGUIDE_ROOT
                 sourceType = 'location'
@@ -306,6 +330,7 @@ jobs:
             }
 
             setup = [ordered]@{
+
               steps = @(
 
                 [ordered]@{
@@ -326,6 +351,7 @@ jobs:
             }
 
             execution = [ordered]@{
+
               testcases = @(
 
                 [ordered]@{
@@ -337,6 +363,7 @@ jobs:
             }
 
             teardown = [ordered]@{
+
               steps = @(
                 [ordered]@{
                   type = 'ecuTestStop'
@@ -345,6 +372,7 @@ jobs:
             }
 
             xilConfigRequirements = @(
+
               [ordered]@{
                 label = 'Identifier'
                 category = 'XIL'
@@ -368,27 +396,6 @@ jobs:
               -LiteralPath $playbookFile `
               -Encoding utf8
 
-          $generatedPlaybook = Get-Content `
-            -LiteralPath $playbookFile `
-            -Raw |
-            ConvertFrom-Json
-
-          $actualIdentifier = [System.Convert]::ToString(
-            $generatedPlaybook.xilConfigRequirements[0].value
-          )
-
-          $actualProjectPath = [System.Convert]::ToString(
-            $generatedPlaybook.execution.testcases[0].relativePath
-          )
-
-          if ($actualIdentifier -ne $env:XIL_IDENTIFIER) {
-            throw 'Generated XIL identifier does not match.'
-          }
-
-          if ($actualProjectPath -ne $env:PROJECT_RELATIVE_PATH) {
-            throw 'Generated project path does not match.'
-          }
-
           "TESTGUIDE_PLAYBOOK_FILE=$playbookFile" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
@@ -404,10 +411,11 @@ jobs:
       # 5. UPLOAD PLAYBOOK
       # ==========================================================
 
-      - name: Upload playbook
+      - name: Upload TestGuide playbook
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+
         run: |
           $ErrorActionPreference = 'Stop'
 
@@ -436,28 +444,13 @@ jobs:
             -LiteralPath $env:TESTGUIDE_PLAYBOOK_FILE `
             -Raw
 
-          try {
-
-            $response = Invoke-RestMethod `
-              -Method POST `
-              -Uri $uploadUrl `
-              -Headers $headers `
-              -ContentType 'application/json' `
-              -Body $body `
-              -ErrorAction Stop
-
-          }
-          catch {
-
-            Write-Host 'PLAYBOOK UPLOAD FAILED'
-            Write-Host $_.Exception.Message
-
-            if ($null -ne $_.ErrorDetails) {
-              Write-Host $_.ErrorDetails.Message
-            }
-
-            throw
-          }
+          $response = Invoke-RestMethod `
+            -Method POST `
+            -Uri $uploadUrl `
+            -Headers $headers `
+            -ContentType 'application/json' `
+            -Body $body `
+            -ErrorAction Stop
 
           $playbookId = [System.Convert]::ToString(
             $response.playbookId
@@ -484,10 +477,11 @@ jobs:
       # 6. EXECUTE PLAYBOOK
       # ==========================================================
 
-      - name: Execute playbook
+      - name: Execute TestGuide playbook
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+
         run: |
           $ErrorActionPreference = 'Stop'
 
@@ -509,8 +503,11 @@ jobs:
           )
 
           $executeRequest = [ordered]@{
+
             name = "$env:JIRA_KEY - $env:TARGET_ECU L2 Quality Gate"
+
             priority = 42
+
             parameters = @()
 
             additionalSettings = [ordered]@{
@@ -562,13 +559,14 @@ jobs:
 
 
       # ==========================================================
-      # 7. POLL EXECUTION TASK
+      # 7. POLL EXECUTION
       # ==========================================================
 
-      - name: Poll execution task
+      - name: Poll TestGuide execution
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+
         run: |
           $ErrorActionPreference = 'Stop'
 
@@ -585,14 +583,14 @@ jobs:
 
           $deadline = (Get-Date).AddMinutes(170)
 
-          $successfulStates = @(
+          $successStates = @(
             'FINISHED',
             'COMPLETED',
             'SUCCESS',
             'SUCCEEDED'
           )
 
-          $failedStates = @(
+          $failureStates = @(
             'ERROR',
             'FAILED',
             'ABORTED',
@@ -620,12 +618,12 @@ jobs:
               )
             ).Trim().ToUpperInvariant()
 
-            $stateInfo = [System.Convert]::ToString(
-              $task.stateInfo
-            )
-
             $verdict = [System.Convert]::ToString(
               $task.aggregatedVerdict
+            )
+
+            $stateInfo = [System.Convert]::ToString(
+              $task.stateInfo
             )
 
             Write-Host (
@@ -635,11 +633,11 @@ jobs:
               "StateInfo=$stateInfo"
             )
 
-            if ($state -in $successfulStates) {
+            if ($state -in $successStates) {
               break
             }
 
-            if ($state -in $failedStates) {
+            if ($state -in $failureStates) {
               throw (
                 "Execution failed. " +
                 "State=$state. " +
@@ -659,9 +657,7 @@ jobs:
                 ).TotalMinutes -ge 5
               ) {
                 throw (
-                  'Execution remained BLOCKED for 5 minutes. ' +
-                  'Check resource identifier: ' +
-                  $env:XIL_IDENTIFIER
+                  'Execution remained BLOCKED for 5 minutes.'
                 )
               }
 
@@ -683,7 +679,7 @@ jobs:
             )
           ).Trim().ToUpperInvariant()
 
-          if ($finalState -notin $successfulStates) {
+          if ($finalState -notin $successStates) {
             throw (
               "Execution polling timed out. " +
               "Last state: $finalState"
@@ -707,39 +703,243 @@ jobs:
 
 
       # ==========================================================
-      # 8. START PDF REPORT GENERATION
+      # 8. WAIT FOR ATX IMPORT
       #
-      # Swagger-confirmed body:
-      #
-      # {
-      #   "parameters": [
-      #     {
-      #       "name": "includeReviews",
-      #       "value": true
-      #     }
-      #   ],
-      #   "dType": "COVERAGE_FILTER",
-      #   "taskId": 2606
-      # }
+      # ecu.test uploads ATX through the ResourceAdapter after
+      # execution. Give ONE.CX time to import the test result
+      # before starting coverage.
       # ==========================================================
 
-      - name: Start PDF report generation
+      - name: Wait for ATX import
+        shell: pwsh
+        run: |
+          Write-Host 'Waiting 30 seconds for ATX import...'
+          Start-Sleep -Seconds 30
+
+
+      # ==========================================================
+      # 9. CREATE COVERAGE CALCULATION
+      # ==========================================================
+
+      - name: Start ONE.CX coverage calculation
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+
         run: |
           $ErrorActionPreference = 'Stop'
 
-          [long]$executionTaskId = 0
+          $headers = @{
+            'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
+            'Accept' = 'application/json'
+          }
+
+          $coverageUrl = (
+            "$env:ONECX_URL/api/coverage"
+          )
+
+          # Use a wide time window around the execution.
+          # The ATX import can finish after the execution task.
+
+          $coverageStart = (
+            Get-Date
+          ).ToUniversalTime().AddHours(-3)
+
+          $coverageEnd = (
+            Get-Date
+          ).ToUniversalTime().AddMinutes(10)
+
+          $minTimestamp = $coverageStart.ToString(
+            'yyyy-MM-ddTHH:mm:ss.fffZ'
+          )
+
+          $maxTimestamp = $coverageEnd.ToString(
+            'yyyy-MM-ddTHH:mm:ss.fffZ'
+          )
+
+          $coverageRequest = [ordered]@{
+
+            projectId = [int]$env:ONECX_PROJECT_ID
+
+            filterDefinitionUUID = (
+              $env:ONECX_COVERAGE_FILTER_UUID
+            )
+
+            baseFilterParameters = [ordered]@{
+
+              minExecutionTimestamp = $minTimestamp
+
+              maxExecutionTimestamp = $maxTimestamp
+
+              testPlanName = ''
+
+              invalidRuns = 'NO_CONSTRAINT'
+
+              testCaseTagSetId = 0
+            }
+
+            placeholderValues = @{}
+
+            scopeFilter = @()
+
+            testGuideInstances = @()
+          }
+
+          $coverageJson = (
+            $coverageRequest |
+            ConvertTo-Json -Depth 30
+          )
+
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'START COVERAGE CALCULATION'
+          Write-Host '========================================'
+          Write-Host "URL        : $coverageUrl"
+          Write-Host "Project    : $env:ONECX_PROJECT_ID"
+          Write-Host "Filter UUID: $env:ONECX_COVERAGE_FILTER_UUID"
+          Write-Host "From       : $minTimestamp"
+          Write-Host "To         : $maxTimestamp"
+          Write-Host 'Request Body:'
+          Write-Host $coverageJson
+          Write-Host '========================================'
+
+          $coverageResponse = Invoke-RestMethod `
+            -Method POST `
+            -Uri $coverageUrl `
+            -Headers $headers `
+            -ContentType 'application/json' `
+            -Body $coverageJson `
+            -ErrorAction Stop
+
+          Write-Host 'Coverage response:'
+
+          $coverageResponse |
+            ConvertTo-Json -Depth 30 |
+            Write-Host
+
+          $coverageTaskId = (
+            [System.Convert]::ToString(
+              $coverageResponse.taskId
+            )
+          )
 
           if (
-            -not [System.Int64]::TryParse(
-              $env:TESTGUIDE_TASK_ID,
-              [ref]$executionTaskId
+            [System.String]::IsNullOrWhiteSpace(
+              $coverageTaskId
             )
           ) {
-            throw 'Execution task ID must be numeric.'
+            throw (
+              'Coverage API did not return taskId.'
+            )
           }
+
+          "COVERAGE_TASK_ID=$coverageTaskId" |
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
+
+          Write-Host ''
+          Write-Host "Coverage Task ID: $coverageTaskId"
+
+
+      # ==========================================================
+      # 10. POLL COVERAGE
+      #
+      # Confirmed response:
+      #
+      # {
+      #   "name": "...",
+      #   "done": true
+      # }
+      # ==========================================================
+
+      - name: Poll ONE.CX coverage calculation
+        shell: pwsh
+        env:
+          ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $headers = @{
+            'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
+            'Accept' = 'application/json'
+          }
+
+          $encodedCoverageTaskId = (
+            [System.Uri]::EscapeDataString(
+              $env:COVERAGE_TASK_ID
+            )
+          )
+
+          $statusUrl = (
+            "$env:ONECX_URL/api/coverage/" +
+            "$encodedCoverageTaskId/status"
+          )
+
+          $deadline = (
+            Get-Date
+          ).AddMinutes(30)
+
+          $attempt = 0
+          $done = $false
+
+          while ((Get-Date) -lt $deadline) {
+
+            $attempt++
+
+            $coverageStatus = Invoke-RestMethod `
+              -Method GET `
+              -Uri $statusUrl `
+              -Headers $headers `
+              -ErrorAction Stop
+
+            $done = [System.Boolean]$coverageStatus.done
+
+            Write-Host (
+              "Attempt $attempt | " +
+              "Coverage=$($coverageStatus.name) | " +
+              "Done=$done"
+            )
+
+            if ($done) {
+              break
+            }
+
+            Start-Sleep -Seconds 5
+          }
+
+          if (-not $done) {
+            throw (
+              'Coverage calculation timed out after ' +
+              '30 minutes.'
+            )
+          }
+
+          "COVERAGE_STATE=COMPLETED" |
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
+
+
+      # ==========================================================
+      # 11. CREATE COVERAGE PDF
+      #
+      # Template 20
+      # dType = COVERAGE_FILTER
+      # taskId = COVERAGE TASK UUID
+      # locale = ENGLISH
+      # ==========================================================
+
+      - name: Start Coverage PDF generation
+        shell: pwsh
+        env:
+          ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+
+        run: |
+          $ErrorActionPreference = 'Stop'
 
           $safeJiraKey = (
             $env:JIRA_KEY -replace
@@ -754,17 +954,19 @@ jobs:
           )
 
           $reportBaseName = (
-            "${safeJiraKey}_${safeEcu}_TestSummary"
+            "${safeJiraKey}_${safeEcu}_TestCoverage"
           )
 
-          $encodedFileName = [System.Uri]::EscapeDataString(
-            $reportBaseName
+          $encodedFileName = (
+            [System.Uri]::EscapeDataString(
+              $reportBaseName
+            )
           )
 
           $exportUrl = (
             "$env:ONECX_URL/api/reporting/export" +
             "?projectId=$env:ONECX_PROJECT_ID" +
-            "&templateId=$env:ONECX_REPORT_TEMPLATE_ID" +
+            "&templateId=$env:ONECX_COVERAGE_TEMPLATE_ID" +
             "&fileName=$encodedFileName" +
             "&locale=ENGLISH" +
             "&keepDataSource=false" +
@@ -787,110 +989,39 @@ jobs:
 
             dType = 'COVERAGE_FILTER'
 
-            taskId = $executionTaskId
+            taskId = $env:COVERAGE_TASK_ID
           }
 
-          $reportJson = $reportRequest |
-            ConvertTo-Json -Depth 10
+          $reportJson = (
+            $reportRequest |
+            ConvertTo-Json -Depth 20
+          )
 
           Write-Host ''
           Write-Host '========================================'
-          Write-Host 'GENERATE TEST SUMMARY REPORT'
+          Write-Host 'CREATE COVERAGE PDF'
           Write-Host '========================================'
-          Write-Host "Execution Task : $executionTaskId"
-          Write-Host "Template       : $env:ONECX_REPORT_TEMPLATE_ID"
-          Write-Host "dType          : COVERAGE_FILTER"
-          Write-Host "Report         : $reportBaseName"
-          Write-Host "URL            : $exportUrl"
+          Write-Host "Coverage Task : $env:COVERAGE_TASK_ID"
+          Write-Host "Template      : $env:ONECX_COVERAGE_TEMPLATE_ID"
+          Write-Host "Locale        : ENGLISH"
+          Write-Host "Report        : $reportBaseName"
           Write-Host 'Request Body:'
           Write-Host $reportJson
           Write-Host '========================================'
 
-          try {
+          $reportResponse = Invoke-RestMethod `
+            -Method POST `
+            -Uri $exportUrl `
+            -Headers $headers `
+            -ContentType 'application/json' `
+            -Body $reportJson `
+            -ErrorAction Stop
 
-            $response = Invoke-RestMethod `
-              -Method POST `
-              -Uri $exportUrl `
-              -Headers $headers `
-              -ContentType 'application/json' `
-              -Body $reportJson `
-              -ErrorAction Stop
-
-          }
-          catch {
-
-            Write-Host ''
-            Write-Host '========================================'
-            Write-Host 'REPORT GENERATION REQUEST FAILED'
-            Write-Host '========================================'
-            Write-Host "Exception: $($_.Exception.Message)"
-
-            if ($null -ne $_.Exception.Response) {
-              try {
-                Write-Host (
-                  "HTTP Status: " +
-                  [int]$_.Exception.Response.StatusCode
-                )
-              }
-              catch {
-                Write-Host 'HTTP status unavailable.'
-              }
-            }
-
-            if ($null -ne $_.ErrorDetails) {
-              Write-Host 'Response body:'
-              Write-Host $_.ErrorDetails.Message
-            }
-
-            throw
-          }
-
-          Write-Host ''
-          Write-Host 'Report generation response:'
-
-          if ($response -is [System.String]) {
-            Write-Host $response
-          }
-          else {
-            $response |
-              ConvertTo-Json -Depth 30 |
-              Write-Host
-          }
-
-          $reportTaskId = $null
-
-          if ($response -is [System.String]) {
-
-            $reportTaskId = [System.String]$response
-
-          }
-          elseif ($null -ne $response.taskId) {
-
-            $reportTaskId = [System.Convert]::ToString(
-              $response.taskId
+          $reportTaskId = (
+            [System.Convert]::ToString(
+              $reportResponse.taskId
             )
-
-          }
-          elseif ($null -ne $response.id) {
-
-            $reportTaskId = [System.Convert]::ToString(
-              $response.id
-            )
-
-          }
-          elseif ($null -ne $response.exportTaskId) {
-
-            $reportTaskId = [System.Convert]::ToString(
-              $response.exportTaskId
-            )
-
-          }
-          elseif ($null -ne $response.reportTaskId) {
-
-            $reportTaskId = [System.Convert]::ToString(
-              $response.reportTaskId
-            )
-          }
+          )
 
           if (
             [System.String]::IsNullOrWhiteSpace(
@@ -898,44 +1029,51 @@ jobs:
             )
           ) {
             throw (
-              'Reporting API did not return a ' +
-              'report task ID.'
+              'Reporting API did not return taskId.'
             )
           }
-
-          $reportTaskId = $reportTaskId.Trim().Trim('"')
 
           $reportFile = Join-Path `
             $env:RUNNER_TEMP `
             "$reportBaseName.pdf"
 
           "TESTGUIDE_REPORT_TASK_ID=$reportTaskId" |
-            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
 
           "TESTGUIDE_REPORT_BASE_NAME=$reportBaseName" |
-            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
 
           "TESTGUIDE_REPORT_FILE=$reportFile" |
-            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
 
-          Write-Host ''
           Write-Host "Report Task ID: $reportTaskId"
-          Write-Host "Report File   : $reportFile"
 
 
       # ==========================================================
-      # 9. POLL REPORT GENERATION
+      # 12. POLL REPORT GENERATION
       # ==========================================================
 
-      - name: Poll report generation
+      - name: Poll Coverage PDF generation
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $encodedReportTaskId = [System.Uri]::EscapeDataString(
-            $env:TESTGUIDE_REPORT_TASK_ID
+          $encodedReportTaskId = (
+            [System.Uri]::EscapeDataString(
+              $env:TESTGUIDE_REPORT_TASK_ID
+            )
           )
 
           $statusUrl = (
@@ -948,128 +1086,110 @@ jobs:
             'Accept' = 'application/json'
           }
 
-          $deadline = (Get-Date).AddMinutes(30)
+          $deadline = (
+            Get-Date
+          ).AddMinutes(30)
 
-          $successfulStates = @(
-            'FINISHED',
-            'COMPLETED',
-            'COMPLETE',
-            'SUCCESS',
-            'SUCCEEDED',
-            'READY',
-            'DONE'
-          )
-
-          $failedStates = @(
-            'FAILED',
-            'FAILURE',
-            'ERROR',
-            'ABORTED',
-            'CANCELLED',
-            'CANCELED'
-          )
-
-          $state = ''
-          $attempt = 0
+          $reportReady = $false
 
           while ((Get-Date) -lt $deadline) {
 
-            $attempt++
-
-            $response = Invoke-RestMethod `
+            $status = Invoke-RestMethod `
               -Method GET `
               -Uri $statusUrl `
               -Headers $headers `
               -ErrorAction Stop
 
-            $rawState = ''
+            Write-Host 'Report status:'
 
-            if ($response -is [System.String]) {
+            $status |
+              ConvertTo-Json -Depth 20 |
+              Write-Host
 
-              $rawState = [System.String]$response
-
-            }
-            elseif ($null -ne $response.state) {
-
-              $rawState = [System.Convert]::ToString(
-                $response.state
-              )
-
-            }
-            elseif ($null -ne $response.status) {
-
-              $rawState = [System.Convert]::ToString(
-                $response.status
-              )
-
-            }
-            elseif ($null -ne $response.statusKey) {
-
-              $rawState = [System.Convert]::ToString(
-                $response.statusKey
-              )
-
-            }
-            elseif ($null -ne $response.key) {
-
-              $rawState = [System.Convert]::ToString(
-                $response.key
-              )
-
-            }
-            elseif ($null -ne $response.finished) {
-
-              if ([System.Boolean]$response.finished) {
-                $rawState = 'FINISHED'
-              }
-              else {
-                $rawState = 'RUNNING'
-              }
-            }
-
-            $state = (
-              $rawState.Trim().Trim('"')
-            ).ToUpperInvariant()
-
-            Write-Host (
-              "Attempt $attempt | Report State=$state"
-            )
-
-            if ($state -in $successfulStates) {
+            if (
+              $null -ne $status.done -and
+              [System.Boolean]$status.done
+            ) {
+              $reportReady = $true
               break
             }
 
-            if ($state -in $failedStates) {
-              throw "Report generation failed: $state"
+            $state = ''
+
+            if ($null -ne $status.state) {
+              $state = (
+                [System.Convert]::ToString(
+                  $status.state
+                )
+              ).ToUpperInvariant()
+            }
+            elseif ($null -ne $status.status) {
+              $state = (
+                [System.Convert]::ToString(
+                  $status.status
+                )
+              ).ToUpperInvariant()
+            }
+
+            if (
+              $state -in @(
+                'FINISHED',
+                'COMPLETED',
+                'SUCCESS',
+                'READY',
+                'DONE'
+              )
+            ) {
+              $reportReady = $true
+              break
+            }
+
+            if (
+              $state -in @(
+                'FAILED',
+                'ERROR',
+                'ABORTED',
+                'CANCELLED',
+                'CANCELED'
+              )
+            ) {
+              throw (
+                "Report generation failed: $state"
+              )
             }
 
             Start-Sleep -Seconds 5
           }
 
-          if ($state -notin $successfulStates) {
+          if (-not $reportReady) {
             throw (
-              "Report generation timed out. " +
-              "Last state: $state"
+              'Report generation timed out.'
             )
           }
 
-          "TESTGUIDE_REPORT_STATE=$state" |
-            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TESTGUIDE_REPORT_STATE=COMPLETED" |
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
 
 
       # ==========================================================
-      # 10. DOWNLOAD PDF REPORT
+      # 13. DOWNLOAD PDF
       # ==========================================================
 
-      - name: Download PDF report
+      - name: Download Coverage PDF
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $encodedReportTaskId = [System.Uri]::EscapeDataString(
-            $env:TESTGUIDE_REPORT_TASK_ID
+          $encodedReportTaskId = (
+            [System.Uri]::EscapeDataString(
+              $env:TESTGUIDE_REPORT_TASK_ID
+            )
           )
 
           $downloadUrl = (
@@ -1081,6 +1201,14 @@ jobs:
             'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
             'Accept' = 'application/pdf'
           }
+
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'DOWNLOAD COVERAGE PDF'
+          Write-Host '========================================'
+          Write-Host "URL  : $downloadUrl"
+          Write-Host "File : $env:TESTGUIDE_REPORT_FILE"
+          Write-Host '========================================'
 
           Invoke-WebRequest `
             -Method GET `
@@ -1094,36 +1222,43 @@ jobs:
               Test-Path -LiteralPath $env:TESTGUIDE_REPORT_FILE
             )
           ) {
-            throw 'Downloaded report file was not created.'
+            throw 'Coverage PDF was not created.'
           }
 
           $reportInfo = Get-Item `
             -LiteralPath $env:TESTGUIDE_REPORT_FILE
 
           if ($reportInfo.Length -lt 5) {
-            throw 'Downloaded report is empty.'
+            throw 'Coverage PDF is empty.'
           }
 
           $bytes = [System.IO.File]::ReadAllBytes(
             $reportInfo.FullName
           )
 
-          $signature = [System.Text.Encoding]::ASCII.GetString(
-            $bytes,
-            0,
-            5
+          $signature = (
+            [System.Text.Encoding]::ASCII.GetString(
+              $bytes,
+              0,
+              5
+            )
           )
 
           if ($signature -ne '%PDF-') {
-            throw 'Downloaded report is not a valid PDF.'
+            throw (
+              'Downloaded file is not a valid PDF.'
+            )
           }
 
           "TESTGUIDE_REPORT_SIZE=$($reportInfo.Length)" |
-            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
 
           Write-Host ''
           Write-Host '========================================'
-          Write-Host 'REPORT DOWNLOADED'
+          Write-Host 'COVERAGE PDF DOWNLOADED'
           Write-Host '========================================'
           Write-Host "File : $($reportInfo.FullName)"
           Write-Host "Size : $($reportInfo.Length) bytes"
@@ -1131,10 +1266,16 @@ jobs:
 
 
       # ==========================================================
-      # 11. UPLOAD PDF TO GITHUB ACTIONS
+      # 14. UPLOAD PDF TO GITHUB ACTIONS
+      #
+      # The report will appear under:
+      #
+      # Actions
+      # → workflow run
+      # → Artifacts
       # ==========================================================
 
-      - name: Upload PDF as workflow artifact
+      - name: Upload Coverage PDF to GitHub Actions
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.TESTGUIDE_REPORT_BASE_NAME }}
@@ -1144,34 +1285,34 @@ jobs:
 
 
       # ==========================================================
-      # 12. SUMMARY
+      # 15. SUMMARY
       # ==========================================================
 
-      - name: Publish summary
+      - name: Publish execution summary
         if: always()
         shell: pwsh
+
         run: |
           $summary = @(
-            '## TestGuide Jira Execution',
+            '## TestGuide Coverage Execution',
             '',
             '| Field | Value |',
             '|---|---|',
             "| Jira | $env:JIRA_KEY |",
-            "| Requested Bench | $env:BENCH_ID |",
-            "| Selected Resource | $env:TESTGUIDE_RESOURCE |",
-            "| XIL Identifier | $env:XIL_IDENTIFIER |",
-            "| Workspace | $env:TESTGUIDE_ROOT |",
-            "| TBC | $env:TBC_RELATIVE_PATH |",
-            "| TCF | $env:TCF_RELATIVE_PATH |",
-            "| PRJ | $env:PROJECT_RELATIVE_PATH |",
+            "| Bench | $env:BENCH_ID |",
+            "| Resource | $env:TESTGUIDE_RESOURCE |",
+            "| ECU | $env:TARGET_ECU |",
+            "| Project ID | $env:ONECX_PROJECT_ID |",
             "| Playbook ID | $env:TESTGUIDE_PLAYBOOK_ID |",
             "| Playbook Link | $env:TESTGUIDE_PLAYBOOK_LINK |",
             "| Execution Task | $env:TESTGUIDE_TASK_ID |",
             "| Execution State | $env:FINAL_TASK_STATE |",
-            "| State Info | $env:FINAL_TASK_STATE_INFO |",
             "| Verdict | $env:FINAL_TASK_VERDICT |",
-            "| Report dType | COVERAGE_FILTER |",
-            "| Report Task | $env:TESTGUIDE_REPORT_TASK_ID |",
+            "| Coverage Filter UUID | $env:ONECX_COVERAGE_FILTER_UUID |",
+            "| Coverage Task UUID | $env:COVERAGE_TASK_ID |",
+            "| Coverage State | $env:COVERAGE_STATE |",
+            "| Report Template | $env:ONECX_COVERAGE_TEMPLATE_ID |",
+            "| Report Task UUID | $env:TESTGUIDE_REPORT_TASK_ID |",
             "| Report State | $env:TESTGUIDE_REPORT_STATE |",
             "| Report File | $env:TESTGUIDE_REPORT_FILE |",
             "| Report Size | $env:TESTGUIDE_REPORT_SIZE bytes |",
