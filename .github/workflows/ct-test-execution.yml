@@ -36,7 +36,7 @@ jobs:
     steps:
 
       # ==========================================================
-      # 1. VALIDATE REQUEST
+      # 1. VALIDATE
       # ==========================================================
 
       - name: Validate request
@@ -62,17 +62,6 @@ jobs:
             ) {
               throw "Missing required value: $($item.Key)"
             }
-          }
-
-          $projectId = 0
-
-          if (
-            -not [System.Int32]::TryParse(
-              $env:ONECX_PROJECT_ID,
-              [ref]$projectId
-            )
-          ) {
-            throw 'ONECX_PROJECT_ID must be an integer.'
           }
 
 
@@ -174,14 +163,10 @@ jobs:
                   $resourceName
                 )
               ) {
-                throw (
-                  "No ONE.CX resource mapping exists for $bench."
-                )
+                throw "No resource mapping exists for $bench."
               }
 
-              $workspaceRoot = (
-                'C:\HIL\Testing\eeint-Test-Automation'
-              )
+              $workspaceRoot = 'C:\HIL\Testing\eeint-Test-Automation'
             }
           }
 
@@ -190,9 +175,7 @@ jobs:
             "$resourceName/ControlComputer"
           )
 
-          $ecuTestStepName = (
-            "ecu.test $resourceName Start"
-          )
+          $ecuTestStepName = "ecu.test $resourceName Start"
 
           $cfg = $env:CONFIGURATION_FOLDER.Trim()
           $benchPackage = $env:BENCH_NAME.Trim()
@@ -269,12 +252,10 @@ jobs:
                 path = $env:TESTGUIDE_ROOT
                 sourceType = 'location'
               }
-
               dependencies = @()
             }
 
             setup = [ordered]@{
-
               steps = @(
 
                 [ordered]@{
@@ -295,8 +276,8 @@ jobs:
             }
 
             execution = [ordered]@{
-
               testcases = @(
+
                 [ordered]@{
                   relativePath = $env:PROJECT_RELATIVE_PATH
                   stepName = $env:ECUTEST_STEP_NAME
@@ -325,17 +306,17 @@ jobs:
             parameters = @()
           }
 
-          $playbookFile = Join-Path `
+          $file = Join-Path `
             $env:RUNNER_TEMP `
             'testguide-playbook.json'
 
           $playbook |
             ConvertTo-Json -Depth 30 |
             Set-Content `
-              -LiteralPath $playbookFile `
+              -LiteralPath $file `
               -Encoding utf8
 
-          "TESTGUIDE_PLAYBOOK_FILE=$playbookFile" |
+          "TESTGUIDE_PLAYBOOK_FILE=$file" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
 
@@ -575,7 +556,7 @@ jobs:
 
 
       # ==========================================================
-      # 7. FIND REPORT FOR THIS EXECUTION
+      # 7. FIND REPORT FOR THIS PLAYBOOK EXECUTION
       # ==========================================================
 
       - name: Find current TestGuide report
@@ -608,7 +589,6 @@ jobs:
           )
 
           $deadline = (Get-Date).AddMinutes(15)
-
           $selectedReport = $null
 
           while ((Get-Date) -lt $deadline) {
@@ -621,19 +601,19 @@ jobs:
               'yyyy-MM-ddTHH:mm:ss.fffZ'
             )
 
-            $encodedStart = [System.Uri]::EscapeDataString(
+            $startEncoded = [System.Uri]::EscapeDataString(
               $startDate
             )
 
-            $encodedEnd = [System.Uri]::EscapeDataString(
+            $endEncoded = [System.Uri]::EscapeDataString(
               $endDate
             )
 
             $url = (
               "$env:ONECX_URL/api/report/reports/history" +
               "?projectId=$env:ONECX_PROJECT_ID" +
-              "&startDate=$encodedStart" +
-              "&endDate=$encodedEnd" +
+              "&startDate=$startEncoded" +
+              "&endDate=$endEncoded" +
               "&offset=0" +
               "&limit=100"
             )
@@ -689,32 +669,31 @@ jobs:
                 )
               } |
               Sort-Object {
+
                 [System.DateTime]::Parse(
                   [System.Convert]::ToString(
                     $_.uploadDate
                   ),
                   [System.Globalization.CultureInfo]::InvariantCulture
                 )
+
               } -Descending
             )
 
             if ($matches.Count -gt 0) {
+
               $selectedReport = $matches[0]
               break
             }
 
-            Write-Host (
-              "Waiting for TestGuide report: " +
-              $expectedPlan
-            )
+            Write-Host "Waiting for $expectedPlan report..."
 
             Start-Sleep -Seconds 15
           }
 
           if ($null -eq $selectedReport) {
             throw (
-              "No TestGuide report found for " +
-              "$expectedPlan."
+              "No TestGuide report found for $expectedPlan."
             )
           }
 
@@ -730,11 +709,22 @@ jobs:
           "TESTGUIDE_REPORT_PLAN=$($selectedReport.testPlanName)" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
-          Write-Host "Selected Report ID: $reportId"
-          Write-Host (
-            "Selected Plan: " +
-            "$($selectedReport.testPlanName)"
-          )
+          "TESTGUIDE_REPORT_EXECUTION_DATE=$($selectedReport.executionDate)" |
+            Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+          "TESTGUIDE_REPORT_UPLOAD_DATE=$($selectedReport.uploadDate)" |
+            Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'PLAYBOOK REPORT'
+          Write-Host '========================================'
+          Write-Host "Execution Task : $env:TESTGUIDE_TASK_ID"
+          Write-Host "Report ID      : $reportId"
+          Write-Host "Plan           : $($selectedReport.testPlanName)"
+          Write-Host "Execution Date : $($selectedReport.executionDate)"
+          Write-Host "Upload Date    : $($selectedReport.uploadDate)"
+          Write-Host '========================================'
 
 
       # ==========================================================
@@ -825,6 +815,10 @@ jobs:
               -Headers $headers `
               -ErrorAction Stop
 
+            $status |
+              ConvertTo-Json -Depth 20 |
+              Write-Host
+
             if (
               $null -ne $status.done -and
               [System.Boolean]$status.done
@@ -836,13 +830,16 @@ jobs:
             $state = ''
 
             if ($null -ne $status.state) {
+
               $state = (
                 [System.Convert]::ToString(
                   $status.state
                 )
               ).Trim().ToUpperInvariant()
+
             }
             elseif ($null -ne $status.status) {
+
               $state = (
                 [System.Convert]::ToString(
                   $status.status
@@ -881,12 +878,19 @@ jobs:
             throw 'ATX export timed out.'
           }
 
+          "ATX_EXPORT_STATE=COMPLETED" |
+            Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
 
       # ==========================================================
-      # 10. DOWNLOAD ATX EXPORT PACKAGE
+      # 10. DOWNLOAD COMPLETE TESTGUIDE EXPORT
+      #
+      # Reverted:
+      # Keep the complete ZIP as returned by TestGuide.
+      # Do not extract .atx files.
       # ==========================================================
 
-      - name: Download ATX export
+      - name: Download TestGuide report export
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
@@ -905,7 +909,7 @@ jobs:
             '_'
           )
 
-          $downloadFile = Join-Path `
+          $temporaryFile = Join-Path `
             $env:RUNNER_TEMP `
             "${safeJira}_${safeEcu}_ATX_Export.bin"
 
@@ -918,6 +922,7 @@ jobs:
             "$taskId/download"
           )
 
+          # Do not force an Accept media type.
           $headers = @{
             'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
           }
@@ -926,21 +931,22 @@ jobs:
             -Method GET `
             -Uri $url `
             -Headers $headers `
-            -OutFile $downloadFile `
+            -OutFile $temporaryFile `
             -ErrorAction Stop
 
-          if (-not (Test-Path $downloadFile)) {
-            throw 'ATX export download is missing.'
+          if (-not (Test-Path -LiteralPath $temporaryFile)) {
+            throw 'TestGuide export was not downloaded.'
           }
 
-          $info = Get-Item $downloadFile
+          $downloadInfo = Get-Item `
+            -LiteralPath $temporaryFile
 
-          if ($info.Length -eq 0) {
-            throw 'ATX export download is empty.'
+          if ($downloadInfo.Length -eq 0) {
+            throw 'TestGuide export is empty.'
           }
 
           $bytes = [System.IO.File]::ReadAllBytes(
-            $downloadFile
+            $temporaryFile
           )
 
           $signatureLength = [System.Math]::Min(
@@ -954,177 +960,68 @@ jobs:
             $signatureLength
           )
 
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'TESTGUIDE EXPORT'
+          Write-Host '========================================'
+          Write-Host "Signature : $signature"
+          Write-Host "Size      : $($downloadInfo.Length)"
+          Write-Host '========================================'
+
           if ($signature.StartsWith('PK')) {
 
-            $package = Join-Path `
+            $finalFile = Join-Path `
               $env:RUNNER_TEMP `
               "${safeJira}_${safeEcu}_ATX_Export.zip"
 
-            Move-Item `
-              $downloadFile `
-              $package `
-              -Force
-
-            "TESTGUIDE_ATX_PACKAGE=$package" |
-              Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-
-            "TESTGUIDE_ATX_PACKAGE_TYPE=ZIP" |
-              Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+            $type = 'ZIP'
 
           }
           else {
 
-            $atxFile = Join-Path `
-              $env:RUNNER_TEMP `
-              "${safeJira}_${safeEcu}_TestReport.atx"
-
-            Move-Item `
-              $downloadFile `
-              $atxFile `
-              -Force
-
-            "TESTGUIDE_ATX_FILE=$atxFile" |
-              Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-
-            "TESTGUIDE_ATX_PACKAGE_TYPE=ATX" |
-              Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          }
-
-
-      # ==========================================================
-      # 11. EXTRACT ONLY CURRENT REPORT ATX
-      # ==========================================================
-
-      - name: Extract current Playbook ATX report
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          if ($env:TESTGUIDE_ATX_PACKAGE_TYPE -eq 'ATX') {
-
-            Write-Host (
-              'TestGuide returned a raw ATX report. ' +
-              'No extraction required.'
+            $previewLength = [System.Math]::Min(
+              500,
+              $bytes.Length
             )
 
-            exit 0
-          }
-
-          if (
-            [System.String]::IsNullOrWhiteSpace(
-              $env:TESTGUIDE_ATX_PACKAGE
+            $preview = [System.Text.Encoding]::UTF8.GetString(
+              $bytes,
+              0,
+              $previewLength
             )
-          ) {
-            throw 'ATX ZIP package path is missing.'
-          }
 
-          $extractFolder = Join-Path `
-            $env:RUNNER_TEMP `
-            "ATX_$env:TESTGUIDE_REPORT_ID"
+            if (
+              $preview.TrimStart().StartsWith('{') -or
+              $preview.TrimStart().StartsWith('<html') -or
+              $preview.TrimStart().StartsWith('<!DOCTYPE html')
+            ) {
 
-          if (Test-Path $extractFolder) {
+              Write-Host $preview
 
-            Remove-Item `
-              -LiteralPath $extractFolder `
-              -Recurse `
-              -Force
-          }
-
-          Expand-Archive `
-            -LiteralPath $env:TESTGUIDE_ATX_PACKAGE `
-            -DestinationPath $extractFolder `
-            -Force
-
-          $atxFiles = @(
-            Get-ChildItem `
-              -LiteralPath $extractFolder `
-              -Recurse `
-              -File `
-              -Filter '*.atx'
-          )
-
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'ATX FILES IN EXPORT'
-          Write-Host '========================================'
-
-          foreach ($file in $atxFiles) {
-            Write-Host $file.FullName
-          }
-
-          Write-Host '========================================'
-
-          if ($atxFiles.Count -eq 0) {
-            throw 'No .atx file found in exported package.'
-          }
-
-          $expectedPlan = (
-            "$($env:TARGET_ECU.Trim())_L2QualityGate"
-          )
-
-          $matchingAtx = @(
-            $atxFiles |
-            Where-Object {
-              $_.BaseName -like "*$expectedPlan*"
+              throw (
+                'TestGuide download returned JSON or HTML.'
+              )
             }
-          )
 
-          $selectedAtx = $null
+            $finalFile = Join-Path `
+              $env:RUNNER_TEMP `
+              "${safeJira}_${safeEcu}_ATX_Export.atx"
 
-          if ($matchingAtx.Count -eq 1) {
-
-            $selectedAtx = $matchingAtx[0]
-
-          }
-          elseif ($matchingAtx.Count -gt 1) {
-
-            $selectedAtx = (
-              $matchingAtx |
-              Sort-Object `
-                LastWriteTime `
-                -Descending |
-              Select-Object -First 1
-            )
-
-          }
-          elseif ($atxFiles.Count -eq 1) {
-
-            $selectedAtx = $atxFiles[0]
-
-          }
-          else {
-
-            throw (
-              'Unable to uniquely identify the ATX for ' +
-              "$expectedPlan. Found $($atxFiles.Count) ATX files."
-            )
+            $type = 'ATX'
           }
 
-          $safeJira = (
-            $env:JIRA_KEY -replace
-            '[^a-zA-Z0-9._-]',
-            '_'
-          )
-
-          $safeEcu = (
-            $env:TARGET_ECU -replace
-            '[^a-zA-Z0-9._-]',
-            '_'
-          )
-
-          $finalAtx = Join-Path `
-            $env:RUNNER_TEMP `
-            "${safeJira}_${safeEcu}_TestReport.atx"
-
-          Copy-Item `
-            -LiteralPath $selectedAtx.FullName `
-            -Destination $finalAtx `
+          Move-Item `
+            -LiteralPath $temporaryFile `
+            -Destination $finalFile `
             -Force
 
           $finalInfo = Get-Item `
-            -LiteralPath $finalAtx
+            -LiteralPath $finalFile
 
-          "TESTGUIDE_ATX_FILE=$finalAtx" |
+          "TESTGUIDE_ATX_FILE=$finalFile" |
+            Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+          "TESTGUIDE_ATX_EXPORT_TYPE=$type" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
           "TESTGUIDE_ATX_SIZE=$($finalInfo.Length)" |
@@ -1132,29 +1029,30 @@ jobs:
 
           Write-Host ''
           Write-Host '========================================'
-          Write-Host 'SELECTED ATX REPORT'
+          Write-Host 'TESTGUIDE REPORT DOWNLOADED'
           Write-Host '========================================'
-          Write-Host "Source : $($selectedAtx.FullName)"
-          Write-Host "Output : $finalAtx"
-          Write-Host "Size   : $($finalInfo.Length)"
+          Write-Host "Report ID : $env:TESTGUIDE_REPORT_ID"
+          Write-Host "Type      : $type"
+          Write-Host "File      : $finalFile"
+          Write-Host "Size      : $($finalInfo.Length)"
           Write-Host '========================================'
 
 
       # ==========================================================
-      # 12. UPLOAD ONLY SELECTED ATX TO GITHUB
+      # 11. UPLOAD COMPLETE TESTGUIDE REPORT TO GITHUB
       # ==========================================================
 
-      - name: Upload ATX report to GitHub Actions
+      - name: Upload TestGuide report to GitHub Actions
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.JIRA_KEY }}_${{ env.TARGET_ECU }}_ATX
+          name: ${{ env.JIRA_KEY }}_${{ env.TARGET_ECU }}_TestGuideReport
           path: ${{ env.TESTGUIDE_ATX_FILE }}
           if-no-files-found: error
           retention-days: 30
 
 
       # ==========================================================
-      # 13. SUMMARY
+      # 12. SUMMARY
       # ==========================================================
 
       - name: Publish execution summary
@@ -1162,7 +1060,7 @@ jobs:
         shell: pwsh
         run: |
           @(
-            '## TestGuide ATX Execution',
+            '## TestGuide Execution',
             '',
             '| Field | Value |',
             '|---|---|',
@@ -1175,9 +1073,12 @@ jobs:
             "| Verdict | $env:FINAL_TASK_VERDICT |",
             "| TestGuide Report ID | $env:TESTGUIDE_REPORT_ID |",
             "| TestGuide Plan | $env:TESTGUIDE_REPORT_PLAN |",
+            "| Report Execution Date | $env:TESTGUIDE_REPORT_EXECUTION_DATE |",
+            "| Report Upload Date | $env:TESTGUIDE_REPORT_UPLOAD_DATE |",
             "| ATX Export Task | $env:ATX_EXPORT_TASK_ID |",
-            "| Selected ATX | $env:TESTGUIDE_ATX_FILE |",
-            "| ATX Size | $env:TESTGUIDE_ATX_SIZE bytes |",
+            "| Export Type | $env:TESTGUIDE_ATX_EXPORT_TYPE |",
+            "| Export File | $env:TESTGUIDE_ATX_FILE |",
+            "| Export Size | $env:TESTGUIDE_ATX_SIZE bytes |",
             "| Workflow Status | ${{ job.status }} |"
           ) |
             Out-File `
