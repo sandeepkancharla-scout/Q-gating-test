@@ -243,7 +243,6 @@ jobs:
           Write-Host '========================================'
           Write-Host 'RESOURCE RESOLUTION'
           Write-Host '========================================'
-          Write-Host "Requested  : $requestedBench"
           Write-Host "Resource   : $resourceName"
           Write-Host "Workspace  : $workspaceRoot"
           Write-Host "Identifier : $xilIdentifier"
@@ -347,7 +346,6 @@ jobs:
             teardown = [ordered]@{
 
               steps = @(
-
                 [ordered]@{
                   type = 'ecuTestStop'
                 }
@@ -525,11 +523,7 @@ jobs:
               analysisExecutionMode = 'sequential'
               downstreamAnalysisPartitioning = 'analysis'
               expirationTimeInMinutes = 60
-
-              issueTrackerTickets = @(
-                $jiraUrl
-              )
-
+              issueTrackerTickets = @($jiraUrl)
               remainingRetriesOnError = 0
             }
           }
@@ -738,10 +732,10 @@ jobs:
       # ==========================================================
       # 8. FIND CURRENT IMPORTED REPORT
       #
-      # Correct API:
+      # Correct endpoint:
       # /api/report/reports/history
       #
-      # Do NOT convert task timestamps with ToUniversalTime().
+      # No ToUniversalTime() conversion.
       # ==========================================================
 
       - name: Find imported TestGuide report
@@ -969,7 +963,7 @@ jobs:
       # ==========================================================
       # 9. START ATX EXPORT
       #
-      # Correct API:
+      # Correct endpoint:
       # POST /api/report/export/atx/{reportId}
       # ==========================================================
 
@@ -1017,6 +1011,12 @@ jobs:
             -Headers $headers `
             -ErrorAction Stop
 
+          Write-Host 'ATX export response:'
+
+          $response |
+            ConvertTo-Json -Depth 20 |
+            Write-Host
+
           $atxTaskId = (
             [System.Convert]::ToString(
               $response.taskId
@@ -1040,7 +1040,7 @@ jobs:
       # ==========================================================
       # 10. POLL ATX EXPORT
       #
-      # Correct API:
+      # Correct endpoint:
       # GET /api/report/export/atx/{taskId}/status
       # ==========================================================
 
@@ -1164,8 +1164,12 @@ jobs:
       # ==========================================================
       # 11. DOWNLOAD ATX EXPORT
       #
-      # Correct API:
+      # Correct endpoint:
       # GET /api/report/export/atx/{taskId}/download
+      #
+      # IMPORTANT:
+      # Do NOT force Accept application/octet-stream.
+      # ONE.CX chooses its native media type.
       # ==========================================================
 
       - name: Download ATX export
@@ -1204,9 +1208,10 @@ jobs:
             "$taskId/download"
           )
 
+          # IMPORTANT:
+          # No Accept header here.
           $headers = @{
             'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
-            'Accept' = 'application/octet-stream'
           }
 
           Write-Host ''
@@ -1216,14 +1221,58 @@ jobs:
           Write-Host "Report ID : $env:TESTGUIDE_REPORT_ID"
           Write-Host "Task UUID : $env:ATX_EXPORT_TASK_ID"
           Write-Host "URL       : $downloadUrl"
+          Write-Host "Temp File : $temporaryFile"
           Write-Host '========================================'
 
-          Invoke-WebRequest `
-            -Method GET `
-            -Uri $downloadUrl `
-            -Headers $headers `
-            -OutFile $temporaryFile `
-            -ErrorAction Stop
+          try {
+
+            $response = Invoke-WebRequest `
+              -Method GET `
+              -Uri $downloadUrl `
+              -Headers $headers `
+              -OutFile $temporaryFile `
+              -PassThru `
+              -ErrorAction Stop
+
+          }
+          catch {
+
+            Write-Host ''
+            Write-Host '========================================'
+            Write-Host 'ATX DOWNLOAD FAILED'
+            Write-Host '========================================'
+            Write-Host "Exception: $($_.Exception.Message)"
+
+            if ($null -ne $_.Exception.Response) {
+
+              try {
+                Write-Host (
+                  "HTTP Status: " +
+                  [int]$_.Exception.Response.StatusCode
+                )
+              }
+              catch {
+                Write-Host 'HTTP status unavailable.'
+              }
+
+              try {
+                Write-Host (
+                  "Content-Type: " +
+                  $_.Exception.Response.Content.Headers.ContentType
+                )
+              }
+              catch {
+                Write-Host 'Content-Type unavailable.'
+              }
+            }
+
+            if ($null -ne $_.ErrorDetails) {
+              Write-Host 'Response body:'
+              Write-Host $_.ErrorDetails.Message
+            }
+
+            throw
+          }
 
           if (
             -not (
@@ -1240,6 +1289,21 @@ jobs:
             throw 'ATX export is empty.'
           }
 
+          Write-Host ''
+          Write-Host "HTTP Status : $($response.StatusCode)"
+
+          try {
+            Write-Host (
+              "Content-Type: " +
+              $response.Headers.'Content-Type'
+            )
+          }
+          catch {
+            Write-Host 'Content-Type unavailable.'
+          }
+
+          Write-Host "Size        : $($fileInfo.Length) bytes"
+
           $bytes = [System.IO.File]::ReadAllBytes(
             $temporaryFile
           )
@@ -1255,7 +1319,7 @@ jobs:
             $signatureLength
           )
 
-          Write-Host "Downloaded Signature: $signature"
+          Write-Host "Signature   : $signature"
 
           if ($signature.StartsWith('PK')) {
 
@@ -1269,7 +1333,7 @@ jobs:
           else {
 
             $previewLength = [System.Math]::Min(
-              200,
+              500,
               $bytes.Length
             )
 
@@ -1291,7 +1355,7 @@ jobs:
 
               throw (
                 'ATX download returned JSON or HTML ' +
-                'instead of the export.'
+                'instead of the exported report.'
               )
             }
 
@@ -1360,11 +1424,15 @@ jobs:
             "| Resource | $env:TESTGUIDE_RESOURCE |",
             "| ECU | $env:TARGET_ECU |",
             "| XIL | $env:XIL_IDENTIFIER |",
+            "| Workspace | $env:TESTGUIDE_ROOT |",
+            "| TBC | $env:TBC_RELATIVE_PATH |",
+            "| TCF | $env:TCF_RELATIVE_PATH |",
             "| PRJ | $env:PROJECT_RELATIVE_PATH |",
             "| Playbook ID | $env:TESTGUIDE_PLAYBOOK_ID |",
             "| Playbook Link | $env:TESTGUIDE_PLAYBOOK_LINK |",
             "| Execution Task | $env:TESTGUIDE_TASK_ID |",
             "| Execution State | $env:FINAL_TASK_STATE |",
+            "| State Info | $env:FINAL_TASK_STATE_INFO |",
             "| Verdict | $env:FINAL_TASK_VERDICT |",
             "| Task Start | $env:TASK_START_DATE |",
             "| Task End | $env:TASK_END_DATE |",
