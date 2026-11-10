@@ -19,6 +19,10 @@ jobs:
       cancel-in-progress: false
 
     env:
+      # ==========================================================
+      # JIRA INPUTS
+      # ==========================================================
+
       JIRA_KEY: ${{ github.event.client_payload.jira_key }}
       BENCH_ID: ${{ github.event.client_payload.bench_id }}
       BENCH_NAME: ${{ github.event.client_payload.bench_name }}
@@ -26,7 +30,15 @@ jobs:
       TEST_CASES: ${{ github.event.client_payload.test_cases }}
       PLAYBOOK_NAME: ${{ github.event.client_payload.playbook_name }}
 
+      # ==========================================================
+      # CONFIGURATION
+      # ==========================================================
+
       CONFIGURATION_FOLDER: 'SUBSYS1'
+
+      # ==========================================================
+      # ONE.CX
+      # ==========================================================
 
       ONECX_URL: 'https://testguide-ssp.onecx.vwgroup.com'
       ONECX_PROJECT_ID: ${{ vars.ONECX_PROJECT_ID }}
@@ -53,6 +65,7 @@ jobs:
           }
 
           foreach ($item in $requiredValues.GetEnumerator()) {
+
             if (
               [System.String]::IsNullOrWhiteSpace(
                 [System.String]$item.Value
@@ -230,13 +243,13 @@ jobs:
           Write-Host '========================================'
           Write-Host 'RESOURCE RESOLUTION'
           Write-Host '========================================'
-          Write-Host "Requested   : $requestedBench"
-          Write-Host "Resource    : $resourceName"
-          Write-Host "Workspace   : $workspaceRoot"
-          Write-Host "Identifier  : $xilIdentifier"
-          Write-Host "TBC         : $tbcRelativePath"
-          Write-Host "TCF         : $tcfRelativePath"
-          Write-Host "PRJ         : $projectRelativePath"
+          Write-Host "Requested  : $requestedBench"
+          Write-Host "Resource   : $resourceName"
+          Write-Host "Workspace  : $workspaceRoot"
+          Write-Host "Identifier : $xilIdentifier"
+          Write-Host "TBC        : $tbcRelativePath"
+          Write-Host "TCF        : $tcfRelativePath"
+          Write-Host "PRJ        : $projectRelativePath"
           Write-Host '========================================'
 
 
@@ -334,6 +347,7 @@ jobs:
             teardown = [ordered]@{
 
               steps = @(
+
                 [ordered]@{
                   type = 'ecuTestStop'
                 }
@@ -437,28 +451,13 @@ jobs:
             -LiteralPath $env:TESTGUIDE_PLAYBOOK_FILE `
             -Raw
 
-          try {
-
-            $response = Invoke-RestMethod `
-              -Method POST `
-              -Uri $uploadUrl `
-              -Headers $headers `
-              -ContentType 'application/json' `
-              -Body $body `
-              -ErrorAction Stop
-
-          }
-          catch {
-
-            Write-Host 'PLAYBOOK UPLOAD FAILED'
-            Write-Host $_.Exception.Message
-
-            if ($null -ne $_.ErrorDetails) {
-              Write-Host $_.ErrorDetails.Message
-            }
-
-            throw
-          }
+          $response = Invoke-RestMethod `
+            -Method POST `
+            -Uri $uploadUrl `
+            -Headers $headers `
+            -ContentType 'application/json' `
+            -Body $body `
+            -ErrorAction Stop
 
           $playbookId = (
             [System.Convert]::ToString(
@@ -535,31 +534,16 @@ jobs:
             }
           }
 
-          try {
-
-            $response = Invoke-RestMethod `
-              -Method POST `
-              -Uri $executeUrl `
-              -Headers $headers `
-              -ContentType 'application/json' `
-              -Body (
-                $executeRequest |
-                ConvertTo-Json -Depth 20
-              ) `
-              -ErrorAction Stop
-
-          }
-          catch {
-
-            Write-Host 'PLAYBOOK EXECUTION FAILED'
-            Write-Host $_.Exception.Message
-
-            if ($null -ne $_.ErrorDetails) {
-              Write-Host $_.ErrorDetails.Message
-            }
-
-            throw
-          }
+          $response = Invoke-RestMethod `
+            -Method POST `
+            -Uri $executeUrl `
+            -Headers $headers `
+            -ContentType 'application/json' `
+            -Body (
+              $executeRequest |
+              ConvertTo-Json -Depth 20
+            ) `
+            -ErrorAction Stop
 
           $taskIds = @($response.taskIds)
 
@@ -689,7 +673,6 @@ jobs:
 
             }
             else {
-
               $blockedSince = $null
             }
 
@@ -751,22 +734,14 @@ jobs:
           "TASK_END_DATE=$endDate" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'EXECUTION COMPLETED'
-          Write-Host '========================================'
-          Write-Host "Task Start : $startDate"
-          Write-Host "Task End   : $endDate"
-          Write-Host "State      : $($task.state)"
-          Write-Host "Verdict    : $($task.aggregatedVerdict)"
-          Write-Host '========================================'
-
 
       # ==========================================================
-      # 8. FIND IMPORTED TESTGUIDE REPORT
+      # 8. FIND CURRENT IMPORTED REPORT
       #
-      # Do not call ToUniversalTime().
-      # ONE.CX task clock values are preserved exactly.
+      # Correct API:
+      # /api/report/reports/history
+      #
+      # Do NOT convert task timestamps with ToUniversalTime().
       # ==========================================================
 
       - name: Find imported TestGuide report
@@ -794,12 +769,11 @@ jobs:
           $windowStart = $taskStart.AddMinutes(-2)
           $windowEnd = $taskEnd.AddMinutes(20)
 
-          $expectedTestPlan = (
+          $expectedPlan = (
             "$($env:TARGET_ECU.Trim())_L2QualityGate"
           )
 
           $deadline = (Get-Date).AddMinutes(15)
-
           $attempt = 0
           $selectedReport = $null
 
@@ -836,7 +810,7 @@ jobs:
             Write-Host '========================================'
             Write-Host "REPORT HISTORY ATTEMPT $attempt"
             Write-Host '========================================'
-            Write-Host "Expected Plan : $expectedTestPlan"
+            Write-Host "Expected Plan : $expectedPlan"
             Write-Host "Task Start    : $env:TASK_START_DATE"
             Write-Host "Task End      : $env:TASK_END_DATE"
             Write-Host "Search Start  : $startDate"
@@ -856,9 +830,6 @@ jobs:
 
             if ($reports.Count -gt 0) {
 
-              Write-Host ''
-              Write-Host 'Reports in current window:'
-
               foreach ($report in $reports) {
 
                 Write-Host (
@@ -875,13 +846,13 @@ jobs:
               $reports |
               Where-Object {
 
-                $reportName = (
+                $name = (
                   [System.Convert]::ToString(
                     $_.testPlanName
                   )
                 ).Trim()
 
-                $reportStatus = (
+                $status = (
                   [System.Convert]::ToString(
                     $_.status
                   )
@@ -906,23 +877,11 @@ jobs:
                   [System.Globalization.CultureInfo]::InvariantCulture
                 )
 
-                $nameMatches = (
-                  $reportName -ieq $expectedTestPlan
-                )
-
-                $statusMatches = (
-                  $reportStatus -eq 'COMPLETE'
-                )
-
-                $timeMatches = (
+                return (
+                  $name -ieq $expectedPlan -and
+                  $status -eq 'COMPLETE' -and
                   $executionDate -ge $windowStart -and
                   $executionDate -le $windowEnd
-                )
-
-                return (
-                  $nameMatches -and
-                  $statusMatches -and
-                  $timeMatches
                 )
               } |
               Sort-Object {
@@ -943,32 +902,25 @@ jobs:
 
               Write-Host ''
               Write-Host (
-                "Matching report found: " +
+                "Matching Report ID: " +
                 "$($selectedReport.reportId)"
               )
 
               break
             }
 
-            Write-Host ''
             Write-Host (
               "No matching COMPLETE report for " +
-              "$expectedTestPlan yet."
+              "$expectedPlan yet."
             )
-
-            Write-Host 'Waiting 15 seconds...'
 
             Start-Sleep -Seconds 15
           }
 
           if ($null -eq $selectedReport) {
-
             throw (
               'No COMPLETE TestGuide report found for ' +
-              "$expectedTestPlan between " +
-              "$($windowStart.ToString('yyyy-MM-ddTHH:mm:ss')) " +
-              'and ' +
-              "$($windowEnd.ToString('yyyy-MM-ddTHH:mm:ss'))."
+              "$expectedPlan in the current execution window."
             )
           }
 
@@ -1016,6 +968,9 @@ jobs:
 
       # ==========================================================
       # 9. START ATX EXPORT
+      #
+      # Correct API:
+      # POST /api/report/export/atx/{reportId}
       # ==========================================================
 
       - name: Start ATX export
@@ -1043,7 +998,7 @@ jobs:
           )
 
           $exportUrl = (
-            "$env:ONECX_URL/api/export/atx/" +
+            "$env:ONECX_URL/api/report/export/atx/" +
             "$reportId" +
             "?useExportStorage=false"
           )
@@ -1084,6 +1039,9 @@ jobs:
 
       # ==========================================================
       # 10. POLL ATX EXPORT
+      #
+      # Correct API:
+      # GET /api/report/export/atx/{taskId}/status
       # ==========================================================
 
       - name: Poll ATX export
@@ -1103,7 +1061,7 @@ jobs:
           )
 
           $statusUrl = (
-            "$env:ONECX_URL/api/export/atx/" +
+            "$env:ONECX_URL/api/report/export/atx/" +
             "$taskId/status"
           )
 
@@ -1205,6 +1163,9 @@ jobs:
 
       # ==========================================================
       # 11. DOWNLOAD ATX EXPORT
+      #
+      # Correct API:
+      # GET /api/report/export/atx/{taskId}/download
       # ==========================================================
 
       - name: Download ATX export
@@ -1230,7 +1191,7 @@ jobs:
             '_'
           )
 
-          $tempFile = Join-Path `
+          $temporaryFile = Join-Path `
             $env:RUNNER_TEMP `
             "${safeJiraKey}_${safeEcu}_ATX_Export.bin"
 
@@ -1239,7 +1200,7 @@ jobs:
           )
 
           $downloadUrl = (
-            "$env:ONECX_URL/api/export/atx/" +
+            "$env:ONECX_URL/api/report/export/atx/" +
             "$taskId/download"
           )
 
@@ -1261,22 +1222,26 @@ jobs:
             -Method GET `
             -Uri $downloadUrl `
             -Headers $headers `
-            -OutFile $tempFile `
+            -OutFile $temporaryFile `
             -ErrorAction Stop
 
-          if (-not (Test-Path -LiteralPath $tempFile)) {
+          if (
+            -not (
+              Test-Path -LiteralPath $temporaryFile
+            )
+          ) {
             throw 'ATX export was not downloaded.'
           }
 
           $fileInfo = Get-Item `
-            -LiteralPath $tempFile
+            -LiteralPath $temporaryFile
 
           if ($fileInfo.Length -eq 0) {
             throw 'ATX export is empty.'
           }
 
           $bytes = [System.IO.File]::ReadAllBytes(
-            $tempFile
+            $temporaryFile
           )
 
           $signatureLength = [System.Math]::Min(
@@ -1319,6 +1284,8 @@ jobs:
               $preview.TrimStart().StartsWith('<html') -or
               $preview.TrimStart().StartsWith('<!DOCTYPE html')
             ) {
+
+              Write-Host ''
               Write-Host 'Unexpected response:'
               Write-Host $preview
 
@@ -1336,7 +1303,7 @@ jobs:
           }
 
           Move-Item `
-            -LiteralPath $tempFile `
+            -LiteralPath $temporaryFile `
             -Destination $finalFile `
             -Force
 
@@ -1363,7 +1330,7 @@ jobs:
 
 
       # ==========================================================
-      # 12. UPLOAD ATX ARTIFACT
+      # 12. UPLOAD ATX TO GITHUB ACTIONS
       # ==========================================================
 
       - name: Upload ATX export to GitHub Actions
@@ -1398,7 +1365,6 @@ jobs:
             "| Playbook Link | $env:TESTGUIDE_PLAYBOOK_LINK |",
             "| Execution Task | $env:TESTGUIDE_TASK_ID |",
             "| Execution State | $env:FINAL_TASK_STATE |",
-            "| State Info | $env:FINAL_TASK_STATE_INFO |",
             "| Verdict | $env:FINAL_TASK_VERDICT |",
             "| Task Start | $env:TASK_START_DATE |",
             "| Task End | $env:TASK_END_DATE |",
