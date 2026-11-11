@@ -38,7 +38,6 @@ jobs:
       JFROG_REPOSITORY: eeint-build-info
 
     steps:
-
       - name: Validate request
         shell: pwsh
         env:
@@ -88,29 +87,17 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           $bench = $env:BENCH_ID.Trim().ToUpperInvariant()
-
           $resourceName = ''
           $workspaceRoot = ''
 
           switch ($bench) {
-
-            {
-              $_ -in @(
-                'SYSHIL1',
-                'SYSHIL1-LABTEST1'
-              )
-            } {
+            { $_ -in @('SYSHIL1', 'SYSHIL1-LABTEST1') } {
               $resourceName = 'syshil1-labtest1'
               $workspaceRoot = 'D:\HIL\Testing\eeint-Test-Automation'
               break
             }
 
-            {
-              $_ -in @(
-                'SYSHIL2',
-                'SYSHIL2-LABTEST2'
-              )
-            } {
+            { $_ -in @('SYSHIL2', 'SYSHIL2-LABTEST2') } {
               $resourceName = 'syshil2-labtest2'
               $workspaceRoot = 'C:\HIL\Testing\eeint-Test-Automation'
               break
@@ -177,30 +164,17 @@ jobs:
             }
 
             default {
+              $resourceName = ([string]$env:RESOURCE_NAME).Trim()
 
-              $resourceName = (
-                [string]$env:RESOURCE_NAME
-              ).Trim()
-
-              if (
-                [string]::IsNullOrWhiteSpace(
-                  $resourceName
-                )
-              ) {
-                throw (
-                  "No ONE.CX resource mapping exists " +
-                  "for BENCH_ID=$bench."
-                )
+              if ([string]::IsNullOrWhiteSpace($resourceName)) {
+                throw "No ONE.CX resource mapping exists for BENCH_ID=$bench."
               }
 
               $workspaceRoot = 'C:\HIL\Testing\eeint-Test-Automation'
             }
           }
 
-          $configurationFolder = (
-            $env:CONFIGURATION_FOLDER.Trim()
-          )
-
+          $configurationFolder = $env:CONFIGURATION_FOLDER.Trim()
           $ecu = $env:TARGET_ECU.Trim()
           $benchPackage = $env:BENCH_NAME.Trim()
 
@@ -209,9 +183,7 @@ jobs:
             "$resourceName/ControlComputer"
           )
 
-          $ecuTestStepName = (
-            "ecu.test $resourceName Start"
-          )
+          $ecuTestStepName = "ecu.test $resourceName Start"
 
           $tbcPath = (
             "Configurations\$configurationFolder\" +
@@ -244,7 +216,7 @@ jobs:
               -Append
 
           Write-Host '========================================'
-          Write-Host 'RESOURCE'
+          Write-Host 'RESOURCE AND PATHS'
           Write-Host '========================================'
           Write-Host "Bench      : $bench"
           Write-Host "Resource   : $resourceName"
@@ -263,7 +235,6 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           $playbook = [ordered]@{
-
             metadata = [ordered]@{
               name = $env:PLAYBOOK_NAME
               taskNameTemplate = '${playbook_name} (${playbook_datetime}) ${distribution_count}'
@@ -271,19 +242,15 @@ jobs:
             }
 
             workspace = [ordered]@{
-
               source = [ordered]@{
                 path = $env:TESTGUIDE_ROOT
                 sourceType = 'location'
               }
-
               dependencies = @()
             }
 
             setup = [ordered]@{
-
               steps = @(
-
                 [ordered]@{
                   reuse = 'always'
                   keepConfiguration = $false
@@ -302,7 +269,6 @@ jobs:
             }
 
             execution = [ordered]@{
-
               testcases = @(
                 [ordered]@{
                   relativePath = $env:PROJECT_RELATIVE_PATH
@@ -313,7 +279,6 @@ jobs:
             }
 
             teardown = [ordered]@{
-
               steps = @(
                 [ordered]@{
                   type = 'ecuTestStop'
@@ -322,7 +287,6 @@ jobs:
             }
 
             xilConfigRequirements = @(
-
               [ordered]@{
                 label = 'Identifier'
                 category = 'XIL'
@@ -344,11 +308,7 @@ jobs:
               -LiteralPath $playbookFile `
               -Encoding utf8
 
-          if (
-            -not (
-              Test-Path -LiteralPath $playbookFile
-            )
-          ) {
+          if (-not (Test-Path -LiteralPath $playbookFile)) {
             throw 'Playbook file was not created.'
           }
 
@@ -397,11 +357,7 @@ jobs:
             )
           ).Trim()
 
-          if (
-            [string]::IsNullOrWhiteSpace(
-              $playbookId
-            )
-          ) {
+          if ([string]::IsNullOrWhiteSpace($playbookId)) {
             throw 'Upload did not return playbookId.'
           }
 
@@ -437,12 +393,7 @@ jobs:
           }
 
           $request = [ordered]@{
-
-            name = (
-              "$env:JIRA_KEY - " +
-              "$env:TARGET_ECU L2 Quality Gate"
-            )
-
+            name = "$env:JIRA_KEY - $env:TARGET_ECU L2 Quality Gate"
             priority = 42
             parameters = @()
 
@@ -450,19 +401,15 @@ jobs:
               analysisExecutionMode = 'sequential'
               downstreamAnalysisPartitioning = 'analysis'
               expirationTimeInMinutes = 60
-
               issueTrackerTickets = @(
                 "$env:JIRA_URL/browse/$env:JIRA_KEY"
               )
-
               remainingRetriesOnError = 0
             }
           }
 
-          $requestJson = (
-            $request |
+          $requestJson = $request |
             ConvertTo-Json -Depth 20
-          )
 
           $response = Invoke-RestMethod `
             -Method POST `
@@ -484,11 +431,7 @@ jobs:
             )
           ).Trim()
 
-          if (
-            [string]::IsNullOrWhiteSpace(
-              $taskId
-            )
-          ) {
+          if ([string]::IsNullOrWhiteSpace($taskId)) {
             throw 'Execution returned an empty taskId.'
           }
 
@@ -507,6 +450,14 @@ jobs:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
         run: |
           $ErrorActionPreference = 'Stop'
+
+          if (
+            [string]::IsNullOrWhiteSpace(
+              $env:TESTGUIDE_TASK_ID
+            )
+          ) {
+            throw 'TESTGUIDE_TASK_ID is missing.'
+          }
 
           $taskId = $env:TESTGUIDE_TASK_ID.Trim()
 
@@ -542,25 +493,20 @@ jobs:
           $completed = $false
           $attempt = 0
 
-          while ((Get-Date) -lt $deadline) {
+          Write-Host "Task URL=$url"
 
+          while ((Get-Date) -lt $deadline) {
             $attempt++
 
             try {
-
-              $task = Invoke-RestMethod `
-                -Method GET `
-                -Uri $url `
+             ri $url `
                 -Headers $headers `
                 -ErrorAction Stop
-
             }
             catch {
-
               $statusCode = 0
 
               if ($null -ne $_.Exception.Response) {
-
                 try {
                   $statusCode = [int]$_.Exception.Response.StatusCode
                 }
@@ -573,9 +519,8 @@ jobs:
                 $statusCode -eq 404 -and
                 $attempt -le 12
               ) {
-
                 Write-Host (
-                  "Task not available yet. " +
+                  "Task $taskId not available yet. " +
                   "Retrying in 5 seconds."
                 )
 
@@ -587,7 +532,7 @@ jobs:
             }
 
             $state = (
-              [convert]::ToString(
+              :ToString(
                 $task.state
               )
             ).Trim().ToUpperInvariant()
@@ -622,20 +567,20 @@ jobs:
           }
 
           $startDate = (
-            [convert]::ToString(
+            :ToString(
               $task.startDate
             )
           ).Trim()
 
           $endDate = (
-            [convert]::ToString(
+            :ToString(
               $task.endDate
             )
           ).Trim()
 
           if (
-            [string]::IsNullOrWhiteSpace($startDate) -or
-            [string]::IsNullOrWhiteSpace($endDate)
+            :IsNullOrWhiteSpace($startDate) -or
+            :IsNullOrWhiteSpace($endDate)
           ) {
             throw 'Completed task has no startDate or endDate.'
           }
@@ -669,18 +614,14 @@ jobs:
             [globalization.CultureInfo]::InvariantCulture
           )
 
-          $taskStart = (
-            [datetime]::Parse(
-              $env:TASK_START_DATE,
-              $culture
-            )
+          $taskStart = :Parse(
+            $env:TASK_START_DATE,
+            $culture
           )
 
-          $taskEnd = (
-            [datetime]::Parse(
-              $env:TASK_END_DATE,
-              $culture
-            )
+          $taskEnd = :Parse(
+            $env:TASK_END_DATE,
+            $culture
           )
 
           $windowStart = $taskStart.AddMinutes(-2)
@@ -691,33 +632,26 @@ jobs:
           )
 
           $deadline = (Get-Date).AddMinutes(15)
-
           $selected = $null
+          $attempt = 0
 
           while ((Get-Date) -lt $deadline) {
+            $attempt++
 
-            $startText = (
-              $windowStart.ToString(
-                'yyyy-MM-ddTHH:mm:ss.fffZ'
-              )
+            $startText = $windowStart.ToString(
+              'yyyy-MM-ddTHH:mm:ss.fffZ'
             )
 
-            $endText = (
-              $windowEnd.ToString(
-                'yyyy-MM-ddTHH:mm:ss.fffZ'
-              )
+            $endText = $windowEnd.ToString(
+              'yyyy-MM-ddTHH:mm:ss.fffZ'
             )
 
-            $startEncoded = (
-              [uri]::EscapeDataString(
-                $startText
-              )
+            $startEncoded = :EscapeDataString(
+              $startText
             )
 
-            $endEncoded = (
-              [uri]::EscapeDataString(
-                $endText
-              )
+            $endEncoded = :EscapeDataString(
+              $endText
             )
 
             $url = (
@@ -727,6 +661,11 @@ jobs:
               "&endDate=$endEncoded" +
               "&offset=0" +
               "&limit=100"
+            )
+
+            Write-Host (
+              "Report attempt=$attempt " +
+              "Plan=$expectedPlan"
             )
 
             $response = Invoke-RestMethod `
@@ -740,38 +679,35 @@ jobs:
             $matches = @(
               $reports |
                 Where-Object {
-
                   $name = (
-                    [convert]::ToString(
+                    :ToString(
                       $_.testPlanName
                     )
                   ).Trim()
 
                   $status = (
-                    [convert]::ToString(
+                    :ToString(
                       $_.status
                     )
                   ).Trim().ToUpperInvariant()
 
                   $executionText = (
-                    [convert]::ToString(
+                    :ToString(
                       $_.executionDate
                     )
                   ).Trim()
 
                   if (
-                    [string]::IsNullOrWhiteSpace(
+                    :IsNullOrWhiteSpace(
                       $executionText
                     )
                   ) {
                     return $false
                   }
 
-                  $executionDate = (
-                    [datetime]::Parse(
-                      $executionText,
-                      $culture
-                    )
+                  $executionDate = :Parse(
+                    $executionText,
+                    $culture
                   )
 
                   return (
@@ -782,8 +718,8 @@ jobs:
                   )
                 } |
                 Sort-Object {
-                  [datetime]::Parse(
-                    [convert]::ToString(
+                  :Parse(
+                    :ToString(
                       $_.uploadDate
                     ),
                     $culture
@@ -797,7 +733,6 @@ jobs:
             }
 
             Write-Host 'Waiting for TestGuide report.'
-
             Start-Sleep -Seconds 15
           }
 
@@ -808,16 +743,12 @@ jobs:
           }
 
           $reportId = (
-            [convert]::ToString(
+            :ToString(
               $selected.reportId
             )
           ).Trim()
 
-          if (
-            [string]::IsNullOrWhiteSpace(
-              $reportId
-            )
-          ) {
+          if (:IsNullOrWhiteSpace($reportId)) {
             throw 'Selected TestGuide report has no reportId.'
           }
 
@@ -847,10 +778,8 @@ jobs:
             'Accept' = 'application/json'
           }
 
-          $reportId = (
-            [uri]::EscapeDataString(
-              $env:TESTGUIDE_REPORT_ID
-            )
+          $reportId = :EscapeDataString(
+            $env:TESTGUIDE_REPORT_ID
           )
 
           $url = (
@@ -866,16 +795,12 @@ jobs:
             -ErrorAction Stop
 
           $taskId = (
-            [convert]::ToString(
+            :ToString(
               $response.taskId
             )
           ).Trim()
 
-          if (
-            [string]::IsNullOrWhiteSpace(
-              $taskId
-            )
-          ) {
+          if (:IsNullOrWhiteSpace($taskId)) {
             throw 'ATX export did not return taskId.'
           }
 
@@ -900,10 +825,8 @@ jobs:
             'Accept' = 'application/json'
           }
 
-          $taskId = (
-            [uri]::EscapeDataString(
-              $env:ATX_EXPORT_TASK_ID
-            )
+          $taskId = :EscapeDataString(
+            $env:ATX_EXPORT_TASK_ID
           )
 
           $url = (
@@ -935,12 +858,15 @@ jobs:
           $ready = $false
 
           while ((Get-Date) -lt $deadline) {
-
             $status = Invoke-RestMethod `
               -Method GET `
               -Uri $url `
               -Headers $headers `
               -ErrorAction Stop
+
+            $status |
+              ConvertTo-Json -Depth 20 |
+              Write-Host
 
             if (
               $null -ne $status.done -and
@@ -953,25 +879,20 @@ jobs:
             $state = ''
 
             if ($null -ne $status.state) {
-
               $state = (
-                [convert]::ToString(
+                :ToString(
                   $status.state
                 )
               ).Trim().ToUpperInvariant()
-
             }
             elseif ($null -ne $status.status) {
-
               $state = (
-                [convert]::ToString(
+                :ToString(
                   $status.status
                 )
               ).Trim().ToUpperInvariant()
-
             }
             elseif ($status -is [string]) {
-
               $state = (
                 $status.Trim().Trim('"')
               ).ToUpperInvariant()
@@ -989,7 +910,20 @@ jobs:
             Start-Sleep -Seconds 5
           }
 
-          if (-not $ready:
+          if (-not $ready) {
+            throw 'ATX export timed out.'
+          }
+
+          "ATX_EXPORT_STATE=COMPLETED" |
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
+
+
+      - name: Download TestGuide report
+        shell: pwsh
+        env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
         run: |
           $ErrorActionPreference = 'Stop'
@@ -1022,10 +956,8 @@ jobs:
             $env:RUNNER_TEMP `
             "${safeJira}_${safeEcu}_ATX_Export.zip"
 
-          $taskId = (
-            :EscapeDataString(
-              $env:ATX_EXPORT_TASK_ID
-            )
+          $taskId = :EscapeDataString(
+            $env:ATX_EXPORT_TASK_ID
           )
 
           $downloadUrl = (
@@ -1053,11 +985,7 @@ jobs:
             -OutFile $reportFile `
             -ErrorAction Stop
 
-          if (
-            -not (
-              Test-Path -LiteralPath $reportFile
-            )
-          ) {
+          if (-not (Test-Path -LiteralPath $reportFile)) {
             throw 'TestGuide report was not downloaded.'
           }
 
@@ -1151,9 +1079,7 @@ jobs:
           )
 
           $headers = @{
-            'Authorization' = (
-              "Bearer $env:JFROG_TOKEN"
-            )
+            Authorization = "Bearer $env:JFROG_TOKEN"
           }
 
           Write-Host '========================================'
@@ -1178,9 +1104,7 @@ jobs:
             $statusCode -lt 200 -or
             $statusCode -ge 300
           ) {
-            throw (
-              "JFrog upload failed. HTTP=$statusCode"
-            )
+            throw "JFrog upload failed. HTTP=$statusCode"
           }
 
           @(
