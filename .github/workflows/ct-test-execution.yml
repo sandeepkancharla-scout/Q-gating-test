@@ -35,14 +35,9 @@ jobs:
       JIRA_URL: https://scoutmotors.atlassian.net
 
       JFROG_URL: https://artifactory.sctmtrs.xyz/artifactory
-      JFROG_REPOSITORY: eeint-build-info
+      JFROG_REPOSITORY: eeint-report-files
 
     steps:
-
-      # ==========================================================
-      # 1. VALIDATE
-      # ==========================================================
-
       - name: Validate request
         shell: pwsh
         env:
@@ -90,10 +85,6 @@ jobs:
           Write-Host '========================================'
 
 
-      # ==========================================================
-      # 2. RESOURCE AND PATHS
-      # ==========================================================
-
       - name: Resolve resource and paths
         shell: pwsh
         run: |
@@ -105,7 +96,6 @@ jobs:
           $root = ''
 
           switch ($bench) {
-
             { $_ -in @('SYSHIL1', 'SYSHIL1-LABTEST1') } {
               $resource = 'syshil1-labtest1'
               $root = 'D:\HIL\Testing\eeint-Test-Automation'
@@ -253,10 +243,6 @@ jobs:
           Write-Host '========================================'
 
 
-      # ==========================================================
-      # 3. GENERATE PLAYBOOK
-      # ==========================================================
-
       - name: Generate TestGuide playbook
         shell: pwsh
         run: |
@@ -348,10 +334,6 @@ jobs:
               -Append
 
 
-      # ==========================================================
-      # 4. UPLOAD PLAYBOOK
-      # ==========================================================
-
       - name: Upload TestGuide playbook
         shell: pwsh
         env:
@@ -401,10 +383,6 @@ jobs:
 
           Write-Host "Playbook ID=$playbookId"
 
-
-      # ==========================================================
-      # 5. EXECUTE
-      # ==========================================================
 
       - name: Execute TestGuide playbook
         shell: pwsh
@@ -471,10 +449,6 @@ jobs:
 
           Write-Host "Execution Task ID=$taskId"
 
-
-      # ==========================================================
-      # 6. POLL EXECUTION
-      # ==========================================================
 
       - name: Poll TestGuide execution
         shell: pwsh
@@ -548,7 +522,7 @@ jobs:
                 $attempt -le 12
               ) {
                 Write-Host (
-                  "Task $taskId is not available yet. " +
+                  "Task $taskId not available yet. " +
                   "Retrying in 5 seconds."
                 )
 
@@ -613,10 +587,6 @@ jobs:
               -Append
 
 
-      # ==========================================================
-      # 7. FIND REPORT
-      # ==========================================================
-
       - name: Find current TestGuide report
         shell: pwsh
         env:
@@ -640,13 +610,9 @@ jobs:
           )
 
           $deadline = (Get-Date).AddMinutes(15)
-
           $selectedReport = $null
-          $attempt = 0
 
           while ((Get-Date) -lt $deadline) {
-            $attempt++
-
             $startDate = $windowStart.ToString(
               'yyyy-MM-ddTHH:mm:ss.fffZ'
             )
@@ -662,11 +628,6 @@ jobs:
               "&endDate=$endDate" +
               "&offset=0" +
               "&limit=100"
-            )
-
-            Write-Host (
-              "Report attempt=$attempt " +
-              "Plan=$expectedPlan"
             )
 
             $response = Invoke-RestMethod `
@@ -716,9 +677,7 @@ jobs:
           }
 
           if ($null -eq $selectedReport) {
-            throw (
-              "No TestGuide report found for $expectedPlan."
-            )
+            throw "No TestGuide report found for $expectedPlan."
           }
 
           $reportId = "$($selectedReport.reportId)".Trim()
@@ -740,10 +699,6 @@ jobs:
 
           Write-Host "Report ID=$reportId"
 
-
-      # ==========================================================
-      # 8. START ATX EXPORT
-      # ==========================================================
 
       - name: Start ATX export
         shell: pwsh
@@ -787,12 +742,6 @@ jobs:
               -Encoding utf8 `
               -Append
 
-          Write-Host "ATX Export Task=$taskId"
-
-
-      # ==========================================================
-      # 9. POLL ATX EXPORT
-      # ==========================================================
 
       - name: Poll ATX export
         shell: pwsh
@@ -898,10 +847,6 @@ jobs:
               -Append
 
 
-      # ==========================================================
-      # 10. DOWNLOAD TO SELF-HOSTED RUNNER
-      # ==========================================================
-
       - name: Download TestGuide report to local runner
         shell: pwsh
         env:
@@ -974,13 +919,9 @@ jobs:
               -Encoding utf8 `
               -Append
 
-          Write-Host "Local report=$reportFile"
+          Write-Host "Local Report=$reportFile"
           Write-Host "Size=$($fileInfo.Length) bytes"
 
-
-      # ==========================================================
-      # 11. OPTIONAL GITHUB COPY
-      # ==========================================================
 
       - name: Upload TestGuide report to GitHub Actions
         uses: actions/upload-artifact@v4
@@ -992,7 +933,7 @@ jobs:
 
 
       # ==========================================================
-      # 12. LOCAL RUNNER TO JFROG
+      # LOCAL RUNNER -> eeint-report-files
       # ==========================================================
 
       - name: Upload local TestGuide report to JFrog
@@ -1020,8 +961,6 @@ jobs:
           }
 
           $token = "$env:JFROG_TOKEN"
-
-          # Remove all copied whitespace/newlines from the secret.
           $token = $token -replace '\s+', ''
 
           if (-not $token) {
@@ -1052,6 +991,7 @@ jobs:
           Write-Host '========================================'
           Write-Host 'LOCAL RUNNER TO JFROG'
           Write-Host '========================================'
+          Write-Host "Repository  : $env:JFROG_REPOSITORY"
           Write-Host "Runner File : $($fileInfo.FullName)"
           Write-Host "Size        : $($fileInfo.Length) bytes"
           Write-Host "JFrog Path  : $artifactPath"
@@ -1092,13 +1032,10 @@ jobs:
           Write-Host '========================================'
           Write-Host 'JFROG UPLOAD COMPLETE'
           Write-Host '========================================'
-          Write-Host "URL: $uploadUrl"
+          Write-Host "Repository : $env:JFROG_REPOSITORY"
+          Write-Host "URL        : $uploadUrl"
           Write-Host '========================================'
 
-
-      # ==========================================================
-      # 13. SUMMARY
-      # ==========================================================
 
       - name: Publish execution summary
         if: always()
@@ -1112,13 +1049,16 @@ jobs:
             "| Jira | $env:JIRA_KEY |"
             "| Bench | $env:BENCH_ID |"
             "| Resource | $env:TESTGUIDE_RESOURCE |"
+            "| Configuration | $env:CONFIGURATION_FOLDER |"
             "| ECU | $env:TARGET_ECU |"
             "| Playbook ID | $env:TESTGUIDE_PLAYBOOK_ID |"
             "| Execution Task | $env:TESTGUIDE_TASK_ID |"
-            "| State | $env:FINAL_TASK_STATE |"
+            "| Execution State | $env:FINAL_TASK_STATE |"
             "| Verdict | $env:FINAL_TASK_VERDICT |"
-            "| Report ID | $env:TESTGUIDE_REPORT_ID |"
+            "| TestGuide Report ID | $env:TESTGUIDE_REPORT_ID |"
+            "| TestGuide Plan | $env:TESTGUIDE_REPORT_PLAN |"
             "| Local Report | $env:TESTGUIDE_ATX_FILE |"
+            "| JFrog Repository | $env:JFROG_REPOSITORY |"
             "| JFrog Path | $env:JFROG_REPORT_PATH |"
             "| JFrog URL | $env:JFROG_REPORT_URL |"
             "| JFrog Status | $env:JFROG_UPLOAD_STATUS |"
