@@ -19,10 +19,6 @@ jobs:
       cancel-in-progress: false
 
     env:
-      # ==========================================================
-      # JIRA INPUTS
-      # ==========================================================
-
       JIRA_KEY: ${{ github.event.client_payload.jira_key }}
       BENCH_ID: ${{ github.event.client_payload.bench_id }}
       BENCH_NAME: ${{ github.event.client_payload.bench_name }}
@@ -31,32 +27,12 @@ jobs:
       PLAYBOOK_NAME: ${{ github.event.client_payload.playbook_name }}
       RESOURCE_NAME: ${{ github.event.client_payload.resource_name }}
 
-      # ==========================================================
-      # CONFIGURATION
-      # ==========================================================
-
-      CONFIGURATION_FOLDER: 'SUBSYS1'
-
-      # ==========================================================
-      # ONE.CX
-      # ==========================================================
-
-      ONECX_URL: 'https://testguide-ssp.onecx.vwgroup.com'
+      ONECX_URL: https://testguide-ssp.onecx.vwgroup.com
       ONECX_PROJECT_ID: ${{ vars.ONECX_PROJECT_ID }}
 
-      # ==========================================================
-      # JIRA
-      # ==========================================================
-
-      JIRA_URL: 'https://scoutmotors.atlassian.net'
-
+      JIRA_URL: https://scoutmotors.atlassian.net
 
     steps:
-
-      # ==========================================================
-      # 1. VALIDATE REQUEST
-      # ==========================================================
-
       - name: Validate request
         shell: pwsh
         run: |
@@ -73,12 +49,7 @@ jobs:
           }
 
           foreach ($item in $requiredValues.GetEnumerator()) {
-
-            if (
-              [System.String]::IsNullOrWhiteSpace(
-                [System.String]$item.Value
-              )
-            ) {
+            if ([string]::IsNullOrWhiteSpace([string]$item.Value)) {
               throw "Missing required value: $($item.Key)"
             }
           }
@@ -86,7 +57,7 @@ jobs:
           $projectId = 0
 
           if (
-            -not [System.Int32]::TryParse(
+            -not [int]::TryParse(
               $env:ONECX_PROJECT_ID,
               [ref]$projectId
             )
@@ -94,54 +65,52 @@ jobs:
             throw 'ONECX_PROJECT_ID must be an integer.'
           }
 
-          Write-Host ''
+          if (
+            [string]::IsNullOrWhiteSpace(
+              '${{ secrets.ONECX_AUTH_KEY }}'
+            )
+          ) {
+            throw 'ONECX_AUTH_KEY secret is missing.'
+          }
+
           Write-Host '========================================'
-          Write-Host 'JIRA EXECUTION REQUEST'
+          Write-Host 'JIRA REQUEST'
           Write-Host '========================================'
           Write-Host "Jira       : $env:JIRA_KEY"
-          Write-Host "Bench      : $env:BENCH_ID"
+          Write-Host "Bench ID   : $env:BENCH_ID"
           Write-Host "Bench Name : $env:BENCH_NAME"
           Write-Host "ECU        : $env:TARGET_ECU"
           Write-Host "Test Cases : $env:TEST_CASES"
           Write-Host "Playbook   : $env:PLAYBOOK_NAME"
-          Write-Host "Project ID : $env:ONECX_PROJECT_ID"
           Write-Host '========================================'
 
-
-      # ==========================================================
-      # 2. RESOLVE RESOURCE
-      # ==========================================================
-
-      - name: Resolve ONE.CX resource
+      - name: Resolve resource and paths
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
           $bench = $env:BENCH_ID.Trim().ToUpperInvariant()
+          $resourceName = ''
+          $workspaceRoot = ''
+          $configurationFolder = ''
 
           switch ($bench) {
-
-            { $_ -in @(
-                'SYSHIL1',
-                'SYSHIL1-LABTEST1'
-              )
-            } {
+            { $_ -in @('SYSHIL1', 'SYSHIL1-LABTEST1') } {
               $resourceName = 'syshil1-labtest1'
               $workspaceRoot = 'D:\HIL\Testing\eeint-Test-Automation'
+              $configurationFolder = 'SYSHIL1'
               break
             }
 
-            { $_ -in @(
-                'SYSHIL2',
-                'SYSHIL2-LABTEST2'
-              )
-            } {
+            { $_ -in @('SYSHIL2', 'SYSHIL2-LABTEST2') } {
               $resourceName = 'syshil2-labtest2'
               $workspaceRoot = 'C:\HIL\Testing\eeint-Test-Automation'
+              $configurationFolder = 'SYSHIL2'
               break
             }
 
-            { $_ -in @(
+            {
+              $_ -in @(
                 'INFO1',
                 'SUBSYSINFO1',
                 'SUBSYSINFO1-INFOTEST1'
@@ -149,10 +118,12 @@ jobs:
             } {
               $resourceName = 'subsysinfo1-infotest1'
               $workspaceRoot = 'C:\HIL\Testing\eeint-Test-Automation'
+              $configurationFolder = 'SUBSYSINFO1'
               break
             }
 
-            { $_ -in @(
+            {
+              $_ -in @(
                 'INFO2',
                 'SUBSYSINFO2',
                 'SUBSYSINFO2-INFOTEST2'
@@ -160,10 +131,12 @@ jobs:
             } {
               $resourceName = 'subsysinfo2-infotest2'
               $workspaceRoot = 'C:\HIL\Testing\eeint-Test-Automation'
+              $configurationFolder = 'SUBSYSINFO2'
               break
             }
 
-            { $_ -in @(
+            {
+              $_ -in @(
                 'THERMAL',
                 'SUBSYSTHERMAL1',
                 'SUBSYSTHERMAL1-THERMALTEST1'
@@ -171,10 +144,12 @@ jobs:
             } {
               $resourceName = 'subsysthermal1-thermaltest1'
               $workspaceRoot = 'C:\HIL\Testing\eeint-Test-Automation'
+              $configurationFolder = 'SUBSYSTHERMAL1'
               break
             }
 
-            { $_ -in @(
+            {
+              $_ -in @(
                 'CHARGING',
                 'SUBSYSCHARGING1',
                 'SUBSYSCHARGING1-LABTEST6'
@@ -182,10 +157,12 @@ jobs:
             } {
               $resourceName = 'subsyscharging1-labtest6'
               $workspaceRoot = 'C:\HIL\Testing\eeint-Test-Automation'
+              $configurationFolder = 'SUBSYSCHARGING1'
               break
             }
 
-            { $_ -in @(
+            {
+              $_ -in @(
                 'MICROBENCH',
                 'MICROBENCHINFO',
                 'MICROBENCHINFO-MICROBENCHHIL1'
@@ -193,26 +170,20 @@ jobs:
             } {
               $resourceName = 'microbenchinfo-microbenchhil1'
               $workspaceRoot = 'C:\HIL\Testing\eeint-Test-Automation'
+              $configurationFolder = 'MICROBENCHINFO'
               break
             }
 
             default {
+              $resourceName = [string]$env:RESOURCE_NAME
+              $resourceName = $resourceName.Trim()
 
-              $resourceName = (
-                [System.Convert]::ToString(
-                  $env:RESOURCE_NAME
-                )
-              ).Trim()
-
-              if (
-                [System.String]::IsNullOrWhiteSpace(
-                  $resourceName
-                )
-              ) {
+              if ([string]::IsNullOrWhiteSpace($resourceName)) {
                 throw "No ONE.CX resource mapping exists for $bench."
               }
 
               $workspaceRoot = 'C:\HIL\Testing\eeint-Test-Automation'
+              $configurationFolder = $bench
             }
           }
 
@@ -221,28 +192,24 @@ jobs:
             "$resourceName/ControlComputer"
           )
 
-          $ecuTestStepName = (
-            "ecu.test $resourceName Start"
-          )
-
-          $cfg = $env:CONFIGURATION_FOLDER.Trim()
+          $ecuTestStepName = "ecu.test $resourceName Start"
           $benchPackage = $env:BENCH_NAME.Trim()
-          $ecu = $env:TARGET_ECU.Trim()
+          $targetEcu = $env:TARGET_ECU.Trim()
 
-          $tbcPath = (
-            "Configurations\$cfg\" +
-            "${cfg}_TestBenchConfig.tbc"
+          $tbcRelativePath = (
+            "Configurations\$configurationFolder\" +
+            "${configurationFolder}_TestBenchConfig.tbc"
           )
 
-          $tcfPath = (
-            "Configurations\$cfg\" +
-            "${cfg}_TestConfig.tcf"
+          $tcfRelativePath = (
+            "Configurations\$configurationFolder\" +
+            "${configurationFolder}_TestConfig.tcf"
           )
 
-          $projectPath = (
+          $projectRelativePath = (
             "Packages\$benchPackage\L2_Quality_Gate\" +
-            "$ecu\" +
-            "${ecu}_L2QualityGate.prj"
+            "$targetEcu\" +
+            "${targetEcu}_L2QualityGate.prj"
           )
 
           "TESTGUIDE_RESOURCE=$resourceName" |
@@ -251,38 +218,58 @@ jobs:
           "TESTGUIDE_ROOT=$workspaceRoot" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
+          "CONFIGURATION_FOLDER=$configurationFolder" |
+            Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
           "XIL_IDENTIFIER=$xilIdentifier" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
           "ECUTEST_STEP_NAME=$ecuTestStepName" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
-          "TBC_RELATIVE_PATH=$tbcPath" |
+          "TBC_RELATIVE_PATH=$tbcRelativePath" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
-          "TCF_RELATIVE_PATH=$tcfPath" |
+          "TCF_RELATIVE_PATH=$tcfRelativePath" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
-          "PROJECT_RELATIVE_PATH=$projectPath" |
+          "PROJECT_RELATIVE_PATH=$projectRelativePath" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
-          Write-Host ''
           Write-Host '========================================'
-          Write-Host 'RESOURCE'
+          Write-Host 'RESOURCE CONFIGURATION'
           Write-Host '========================================'
-          Write-Host "Bench      : $bench"
-          Write-Host "Resource   : $resourceName"
-          Write-Host "Workspace  : $workspaceRoot"
-          Write-Host "Identifier : $xilIdentifier"
-          Write-Host "TBC        : $tbcPath"
-          Write-Host "TCF        : $tcfPath"
-          Write-Host "PRJ        : $projectPath"
+          Write-Host "Bench         : $bench"
+          Write-Host "Resource      : $resourceName"
+          Write-Host "Workspace     : $workspaceRoot"
+          Write-Host "Configuration : $configurationFolder"
+          Write-Host "Identifier    : $xilIdentifier"
+          Write-Host "TBC           : $tbcRelativePath"
+          Write-Host "TCF           : $tcfRelativePath"
+          Write-Host "Project       : $projectRelativePath"
           Write-Host '========================================'
 
+      - name: Parse Jira test cases
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
 
-      # ==========================================================
-      # 3. GENERATE PLAYBOOK
-      # ==========================================================
+          $ids = @(
+            $env:TEST_CASES -split '[,;]' |
+            ForEach-Object { $_.Trim() } |
+            Where-Object {
+              -not [string]::IsNullOrWhiteSpace($_)
+            }
+          )
+
+          if ($ids.Count -eq 0) {
+            throw 'No valid Jira test case IDs.'
+          }
+
+          $normalized = $ids -join ','
+
+          "NORMALIZED_TEST_CASES=$normalized" |
+            Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Generate TestGuide playbook
         shell: pwsh
@@ -290,7 +277,6 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           $playbook = [ordered]@{
-
             metadata = [ordered]@{
               name = $env:PLAYBOOK_NAME
               taskNameTemplate = '${playbook_name} (${playbook_datetime}) ${distribution_count}'
@@ -298,19 +284,15 @@ jobs:
             }
 
             workspace = [ordered]@{
-
               source = [ordered]@{
                 path = $env:TESTGUIDE_ROOT
                 sourceType = 'location'
               }
-
               dependencies = @()
             }
 
             setup = [ordered]@{
-
               steps = @(
-
                 [ordered]@{
                   reuse = 'always'
                   keepConfiguration = $false
@@ -318,7 +300,6 @@ jobs:
                   stepName = $env:ECUTEST_STEP_NAME
                   type = 'ecuTestStart'
                 },
-
                 [ordered]@{
                   tbcPath = $env:TBC_RELATIVE_PATH
                   tcfPath = $env:TCF_RELATIVE_PATH
@@ -329,7 +310,6 @@ jobs:
             }
 
             execution = [ordered]@{
-
               testcases = @(
                 [ordered]@{
                   relativePath = $env:PROJECT_RELATIVE_PATH
@@ -340,7 +320,6 @@ jobs:
             }
 
             teardown = [ordered]@{
-
               steps = @(
                 [ordered]@{
                   type = 'ecuTestStop'
@@ -349,7 +328,6 @@ jobs:
             }
 
             xilConfigRequirements = @(
-
               [ordered]@{
                 label = 'Identifier'
                 category = 'XIL'
@@ -365,19 +343,22 @@ jobs:
             $env:RUNNER_TEMP `
             'testguide-playbook.json'
 
-          $playbook |
-            ConvertTo-Json -Depth 30 |
+          $playbookJson = $playbook |
+            ConvertTo-Json -Depth 30
+
+          $playbookJson |
             Set-Content `
               -LiteralPath $playbookFile `
               -Encoding utf8
 
+          if (-not (Test-Path -LiteralPath $playbookFile)) {
+            throw 'Playbook file was not created.'
+          }
+
           "TESTGUIDE_PLAYBOOK_FILE=$playbookFile" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
-
-      # ==========================================================
-      # 4. UPLOAD PLAYBOOK
-      # ==========================================================
+          Write-Host $playbookJson
 
       - name: Upload TestGuide playbook
         shell: pwsh
@@ -386,15 +367,11 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          if (
-            [System.String]::IsNullOrWhiteSpace(
-              $env:ONECX_AUTH_KEY
-            )
-          ) {
+          if ([string]::IsNullOrWhiteSpace($env:ONECX_AUTH_KEY)) {
             throw 'ONECX_AUTH_KEY is missing.'
           }
 
-          $folder = [System.Uri]::EscapeDataString('/')
+          $folder = [uri]::EscapeDataString('/')
 
           $url = (
             "$env:ONECX_URL/api/v2/execution/playbook" +
@@ -419,17 +396,11 @@ jobs:
             -Body $body `
             -ErrorAction Stop
 
-          $playbookId = (
-            [System.Convert]::ToString(
-              $response.playbookId
-            )
+          $playbookId = [convert]::ToString(
+            $response.playbookId
           ).Trim()
 
-          if (
-            [System.String]::IsNullOrWhiteSpace(
-              $playbookId
-            )
-          ) {
+          if ([string]::IsNullOrWhiteSpace($playbookId)) {
             throw 'Upload did not return playbookId.'
           }
 
@@ -440,11 +411,6 @@ jobs:
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
           Write-Host "Playbook ID: $playbookId"
-
-
-      # ==========================================================
-      # 5. EXECUTE PLAYBOOK
-      # ==========================================================
 
       - name: Execute TestGuide playbook
         shell: pwsh
@@ -470,38 +436,25 @@ jobs:
           )
 
           $request = [ordered]@{
-
             name = (
               "$env:JIRA_KEY - " +
               "$env:TARGET_ECU L2 Quality Gate"
             )
 
             priority = 42
-
             parameters = @()
 
             additionalSettings = [ordered]@{
               analysisExecutionMode = 'sequential'
               downstreamAnalysisPartitioning = 'analysis'
               expirationTimeInMinutes = 60
-
-              issueTrackerTickets = @(
-                $jiraIssueUrl
-              )
-
+              issueTrackerTickets = @($jiraIssueUrl)
               remainingRetriesOnError = 0
-            }
-          }
-
-          $response = Invoke-RestMethod `
-            -Method POST `
+       ethod POST `
             -Uri $url `
             -Headers $headers `
             -ContentType 'application/json' `
-            -Body (
-              $request |
-              ConvertTo-Json -Depth 20
-            ) `
+            -Body ($request | ConvertTo-Json -Depth 20) `
             -ErrorAction Stop
 
           $taskIds = @($response.taskIds)
@@ -510,17 +463,11 @@ jobs:
             throw 'Execution did not return taskIds.'
           }
 
-          $taskId = (
-            [System.Convert]::ToString(
-              $taskIds[0]
-            )
+          $taskId = :ToString(
+            $taskIds[0]
           ).Trim()
 
-          if (
-            [System.String]::IsNullOrWhiteSpace(
-              $taskId
-            )
-          ) {
+          if (:IsNullOrWhiteSpace($taskId)) {
             throw 'Execution returned an empty taskId.'
           }
 
@@ -528,11 +475,6 @@ jobs:
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
           Write-Host "Execution Task ID: $taskId"
-
-
-      # ==========================================================
-      # 6. POLL EXECUTION
-      # ==========================================================
 
       - name: Poll TestGuide execution
         shell: pwsh
@@ -572,17 +514,14 @@ jobs:
           $task = $null
 
           while ((Get-Date) -lt $deadline) {
-
             $task = Invoke-RestMethod `
               -Method GET `
               -Uri $url `
               -Headers $headers `
               -ErrorAction Stop
 
-            $state = (
-              [System.Convert]::ToString(
-                $task.state
-              )
+            $state = :ToString(
+              $task.state
             ).Trim().ToUpperInvariant()
 
             Write-Host (
@@ -606,20 +545,29 @@ jobs:
           }
 
           if ($null -eq $task) {
-            throw 'No execution response.'
+            throw 'No execution response was received.'
           }
 
-          $finalState = (
-            [System.Convert]::ToString(
-              $task.state
-            )
+          $finalState = :ToString(
+            $task.state
           ).Trim().ToUpperInvariant()
 
           if ($finalState -notin $successStates) {
             throw "Execution timed out. State=$finalState"
           }
 
+          if (:IsNullOrWhiteSpace([string]$task.startDate)) {
+            throw 'Completed task has no startDate.'
+          }
+
+          if (:IsNullOrWhiteSpace([string]$task.endDate)) {
+            throw 'Completed task has no endDate.'
+          }
+
           "FINAL_TASK_STATE=$($task.state)" |
+            Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+          "FINAL_TASK_STATE_INFO=$($task.stateInfo)" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
           "FINAL_TASK_VERDICT=$($task.aggregatedVerdict)" |
@@ -630,11 +578,6 @@ jobs:
 
           "TASK_END_DATE=$($task.endDate)" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-
-
-      # ==========================================================
-      # 7. FIND CURRENT TESTGUIDE REPORT
-      # ==========================================================
 
       - name: Find current TestGuide report
         shell: pwsh
@@ -648,14 +591,14 @@ jobs:
             'Accept' = 'application/json'
           }
 
-          $taskStart = [System.DateTime]::Parse(
+          $taskStart = :Parse(
             $env:TASK_START_DATE,
-            [System.Globalization.CultureInfo]::InvariantCulture
+            [globalization.CultureInfo]::InvariantCulture
           )
 
-          $taskEnd = [System.DateTime]::Parse(
+          $taskEnd = :Parse(
             $env:TASK_END_DATE,
-            [System.Globalization.CultureInfo]::InvariantCulture
+            [globalization.CultureInfo]::InvariantCulture
           )
 
           $windowStart = $taskStart.AddMinutes(-2)
@@ -667,8 +610,10 @@ jobs:
 
           $deadline = (Get-Date).AddMinutes(15)
           $selectedReport = $null
+          $attempt = 0
 
           while ((Get-Date) -lt $deadline) {
+            $attempt++
 
             $startDate = $windowStart.ToString(
               'yyyy-MM-ddTHH:mm:ss.fffZ'
@@ -678,21 +623,26 @@ jobs:
               'yyyy-MM-ddTHH:mm:ss.fffZ'
             )
 
-            $startEncoded = [System.Uri]::EscapeDataString(
+            $encodedStart = :EscapeDataString(
               $startDate
             )
 
-            $endEncoded = [System.Uri]::EscapeDataString(
+            $encodedEnd = :EscapeDataString(
               $endDate
             )
 
             $url = (
               "$env:ONECX_URL/api/report/reports/history" +
               "?projectId=$env:ONECX_PROJECT_ID" +
-              "&startDate=$startEncoded" +
-              "&endDate=$endEncoded" +
+              "&startDate=$encodedStart" +
+              "&endDate=$encodedEnd" +
               "&offset=0" +
               "&limit=100"
+            )
+
+            Write-Host (
+              "Report-history attempt $attempt | " +
+              "Expected=$expectedPlan"
             )
 
             $response = Invoke-RestMethod `
@@ -706,36 +656,25 @@ jobs:
             $matches = @(
               $reports |
               Where-Object {
-
-                $name = (
-                  [System.Convert]::ToString(
-                    $_.testPlanName
-                  )
+                $name = :ToString(
+                  $_.testPlanName
                 ).Trim()
 
-                $status = (
-                  [System.Convert]::ToString(
-                    $_.status
-                  )
+                $status = :ToString(
+                  $_.status
                 ).Trim().ToUpperInvariant()
 
-                $executionText = (
-                  [System.Convert]::ToString(
-                    $_.executionDate
-                  )
+                $executionText = :ToString(
+                  $_.executionDate
                 ).Trim()
 
-                if (
-                  [System.String]::IsNullOrWhiteSpace(
-                    $executionText
-                  )
-                ) {
+                if (:IsNullOrWhiteSpace($executionText)) {
                   return $false
                 }
 
-                $executionDate = [System.DateTime]::Parse(
+                $executionDate = :Parse(
                   $executionText,
-                  [System.Globalization.CultureInfo]::InvariantCulture
+                  [globalization.CultureInfo]::InvariantCulture
                 )
 
                 return (
@@ -746,14 +685,10 @@ jobs:
                 )
               } |
               Sort-Object {
-
-                [System.DateTime]::Parse(
-                  [System.Convert]::ToString(
-                    $_.uploadDate
-                  ),
-                  [System.Globalization.CultureInfo]::InvariantCulture
+                :Parse(
+                  :ToString($_.uploadDate),
+                  [globalization.CultureInfo]::InvariantCulture
                 )
-
               } -Descending
             )
 
@@ -762,8 +697,6 @@ jobs:
               break
             }
 
-            Write-Host "Waiting for $expectedPlan report..."
-
             Start-Sleep -Seconds 15
           }
 
@@ -771,11 +704,13 @@ jobs:
             throw "No TestGuide report found for $expectedPlan."
           }
 
-          $reportId = (
-            [System.Convert]::ToString(
-              $selectedReport.reportId
-            )
+          $reportId = :ToString(
+            $selectedReport.reportId
           ).Trim()
+
+          if (:IsNullOrWhiteSpace($reportId)) {
+            throw 'Selected TestGuide report has no reportId.'
+          }
 
           "TESTGUIDE_REPORT_ID=$reportId" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
@@ -789,21 +724,7 @@ jobs:
           "TESTGUIDE_REPORT_UPLOAD_DATE=$($selectedReport.uploadDate)" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'TESTGUIDE REPORT'
-          Write-Host '========================================'
-          Write-Host "Execution Task : $env:TESTGUIDE_TASK_ID"
-          Write-Host "Report ID      : $reportId"
-          Write-Host "Plan           : $($selectedReport.testPlanName)"
-          Write-Host "Execution Date : $($selectedReport.executionDate)"
-          Write-Host "Upload Date    : $($selectedReport.uploadDate)"
-          Write-Host '========================================'
-
-
-      # ==========================================================
-      # 8. START ATX EXPORT
-      # ==========================================================
+          Write-Host "TestGuide Report ID: $reportId"
 
       - name: Start ATX export
         shell: pwsh
@@ -817,7 +738,7 @@ jobs:
             'Accept' = 'application/json'
           }
 
-          $reportId = [System.Uri]::EscapeDataString(
+          $reportId = :EscapeDataString(
             $env:TESTGUIDE_REPORT_ID
           )
 
@@ -833,17 +754,11 @@ jobs:
             -Headers $headers `
             -ErrorAction Stop
 
-          $taskId = (
-            [System.Convert]::ToString(
-              $response.taskId
-            )
+          $taskId = :ToString(
+            $response.taskId
           ).Trim()
 
-          if (
-            [System.String]::IsNullOrWhiteSpace(
-              $taskId
-            )
-          ) {
+          if (:IsNullOrWhiteSpace($taskId)) {
             throw 'ATX export did not return taskId.'
           }
 
@@ -851,11 +766,6 @@ jobs:
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
           Write-Host "ATX Export Task: $taskId"
-
-
-      # ==========================================================
-      # 9. POLL ATX EXPORT
-      # ==========================================================
 
       - name: Poll ATX export
         shell: pwsh
@@ -869,7 +779,7 @@ jobs:
             'Accept' = 'application/json'
           }
 
-          $taskId = [System.Uri]::EscapeDataString(
+          $taskId = :EscapeDataString(
             $env:ATX_EXPORT_TASK_ID
           )
 
@@ -882,7 +792,6 @@ jobs:
           $ready = $false
 
           while ((Get-Date) -lt $deadline) {
-
             $status = Invoke-RestMethod `
               -Method GET `
               -Uri $url `
@@ -895,7 +804,7 @@ jobs:
 
             if (
               $null -ne $status.done -and
-              [System.Boolean]$status.done
+              [bool]$status.done
             ) {
               $ready = $true
               break
@@ -904,26 +813,26 @@ jobs:
             $state = ''
 
             if ($null -ne $status.state) {
-              $state = (
-                [System.Convert]::ToString(
-                  $status.state
-                )
+              $state = :ToString(
+                $status.state
               ).Trim().ToUpperInvariant()
             }
             elseif ($null -ne $status.status) {
-              $state = (
-                [System.Convert]::ToString(
-                  $status.status
-                )
+              $state = :ToString(
+                $status.status
               ).Trim().ToUpperInvariant()
-      ).Trim().ToUpperInvariant()
+            }
+            elseif ($status -is [string]) {
+              $state = $status.Trim().Trim('"').ToUpperInvariant()
             }
 
             if (
               $state -in @(
                 'FINISHED',
                 'COMPLETED',
+                'COMPLETE',
                 'SUCCESS',
+                'SUCCEEDED',
                 'READY',
                 'DONE'
               )
@@ -935,32 +844,36 @@ jobs:
             if (
               $state -in @(
                 'FAILED',
+                'FAILURE',
                 'ERROR',
                 'ABORTED',
-                'CANCELLED'
+                'CANCELLED',
+                'CANCELED'
               )
             ) {
               throw "ATX export failed: $state"
             }
 
-            Start-Sleep -f (-not $ready) {
+            Start-Sleep -Seconds 5
+          }
+
+          if (-not $ready) {
             throw 'ATX export timed out.'
           }
 
           "ATX_EXPORT_STATE=COMPLETED" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
-
-      # ==========================================================
-      # 10. DOWNLOAD COMPLETE TESTGUIDE EXPORT
-      # ==========================================================
-
-      - name: Download TestGuide report export
+      - name: Download TestGuide report
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
         run: |
           $ErrorActionPreference = 'Stop'
+
+          if ($env:ATX_EXPORT_STATE -ne 'COMPLETED') {
+            throw 'ATX export is not complete.'
+          }
 
           $safeJira = (
             $env:JIRA_KEY -replace
@@ -978,7 +891,7 @@ jobs:
             $env:RUNNER_TEMP `
             "${safeJira}_${safeEcu}_ATX_Export.bin"
 
-          $taskId = [System.Uri]::EscapeDataString(
+          $taskId = :EscapeDataString(
             $env:ATX_EXPORT_TASK_ID
           )
 
@@ -1009,38 +922,35 @@ jobs:
             throw 'TestGuide report is empty.'
           }
 
-          $bytes = [System.IO.File]::ReadAllBytes(
+          $bytes = [io.file]::ReadAllBytes(
             $temporaryFile
           )
 
-          $signatureLength = [System.Math]::Min(
+          $signatureLength = :Min(
             4,
             $bytes.Length
           )
 
-          $signature = [System.Text.Encoding]::ASCII.GetString(
+          $signature = [text.encoding]::ASCII.GetString(
             $bytes,
             0,
             $signatureLength
           )
 
           if ($signature.StartsWith('PK')) {
-
             $finalFile = Join-Path `
               $env:RUNNER_TEMP `
               "${safeJira}_${safeEcu}_ATX_Export.zip"
 
-            $type = 'ZIP'
-
+            $exportType = 'ZIP'
           }
           else {
-
-            $previewLength = [System.Math]::Min(
+            $previewLength = :Min(
               500,
               $bytes.Length
             )
 
-            $preview = [System.Text.Encoding]::UTF8.GetString(
+            $preview = [text.encoding]::UTF8.GetString(
               $bytes,
               0,
               $previewLength
@@ -1059,7 +969,7 @@ jobs:
               $env:RUNNER_TEMP `
               "${safeJira}_${safeEcu}_ATX_Export.atx"
 
-            $type = 'ATX'
+            $exportType = 'ATX'
           }
 
           Move-Item `
@@ -1073,26 +983,14 @@ jobs:
           "TESTGUIDE_ATX_FILE=$finalFile" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
-          "TESTGUIDE_ATX_EXPORT_TYPE=$type" |
+          "TESTGUIDE_ATX_EXPORT_TYPE=$exportType" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
           "TESTGUIDE_ATX_SIZE=$($finalInfo.Length)" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'TESTGUIDE REPORT DOWNLOADED'
-          Write-Host '========================================'
-          Write-Host "Report ID : $env:TESTGUIDE_REPORT_ID"
-          Write-Host "Type      : $type"
-          Write-Host "File      : $finalFile"
-          Write-Host "Size      : $($finalInfo.Length)"
-          Write-Host '========================================'
-
-
-      # ==========================================================
-      # 11. UPLOAD REPORT TO GITHUB ACTIONS
-      # ==========================================================
+          Write-Host "Report: $finalFile"
+          Write-Host "Size: $($finalInfo.Length) bytes"
 
       - name: Upload TestGuide report to GitHub Actions
         uses: actions/upload-artifact@v4
@@ -1102,16 +1000,6 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-
-      # ==========================================================
-      # 12. ATTACH REPORT DIRECTLY TO JIRA
-      #
-      # GitHub Secrets required:
-      #
-      # JIRA_EMAIL
-      # JIRA_API_TOKEN
-      # ==========================================================
-
       - name: Attach TestGuide report to Jira
         shell: pwsh
         env:
@@ -1120,36 +1008,12 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          if (
-            [System.String]::IsNullOrWhiteSpace(
-              $env:JIRA_EMAIL
-            )
-          ) {
-            throw 'JIRA_EMAIL GitHub secret is missing.'
+          if (:IsNullOrWhiteSpace($env:JIRA_EMAIL)) {
+            throw 'JIRA_EMAIL secret is missing.'
           }
 
-          if (
-            [System.String]::IsNullOrWhiteSpace(
-              $env:JIRA_API_TOKEN
-            )
-          ) {
-            throw 'JIRA_API_TOKEN GitHub secret is missing.'
-          }
-
-          if (
-            [System.String]::IsNullOrWhiteSpace(
-              $env:JIRA_KEY
-            )
-          ) {
-            throw 'JIRA_KEY is missing.'
-          }
-
-          if (
-            [System.String]::IsNullOrWhiteSpace(
-              $env:TESTGUIDE_ATX_FILE
-            )
-          ) {
-            throw 'TESTGUIDE_ATX_FILE is missing.'
+          if (:IsNullOrWhiteSpace($env:JIRA_API_TOKEN)) {
+            throw 'JIRA_API_TOKEN secret is missing.'
           }
 
           if (
@@ -1158,7 +1022,7 @@ jobs:
             )
           ) {
             throw (
-              'TestGuide report file does not exist: ' +
+              'TestGuide report does not exist: ' +
               $env:TESTGUIDE_ATX_FILE
             )
           }
@@ -1166,68 +1030,50 @@ jobs:
           $fileInfo = Get-Item `
             -LiteralPath $env:TESTGUIDE_ATX_FILE
 
-          if ($fileInfo.Length -eq 0) {
-            throw 'TestGuide report file is empty.'
-          }
-
           $jiraAttachmentUrl = (
             "$env:JIRA_URL/rest/api/3/issue/" +
             "$env:JIRA_KEY/attachments"
           )
 
-          Write-Host ''
           Write-Host '========================================'
-          Write-Host 'ATTACH TESTGUIDE REPORT TO JIRA'
+          Write-Host 'ATTACH REPORT TO JIRA'
           Write-Host '========================================'
-          Write-Host "Issue     : $env:JIRA_KEY"
-          Write-Host "Report ID : $env:TESTGUIDE_REPORT_ID"
-          Write-Host "File      : $($fileInfo.FullName)"
-          Write-Host "Size      : $($fileInfo.Length) bytes"
+          Write-Host "Issue : $env:JIRA_KEY"
+          Write-Host "File  : $($fileInfo.FullName)"
+          Write-Host "Size  : $($fileInfo.Length)"
           Write-Host '========================================'
 
-          $curlOutput = & curl.exe `
-            --fail-with-body `
-            --silent `
-            --show-error `
-            --request POST `
-            --user "${env:JIRA_EMAIL}:${env:JIRA_API_TOKEN}" `
-            --header "X-Atlassian-Token: no-check" `
-            --form "file=@$($fileInfo.FullName)" `
+          $curlArguments = @(
+            '--fail-with-body'
+            '--silent'
+            '--show-error'
+            '--request'
+            'POST'
+            '--user'
+            "${env:JIRA_EMAIL}:${env:JIRA_API_TOKEN}"
+            '--header'
+            'X-Atlassian-Token: no-check'
+            '--form'
+            "file=@$($fileInfo.FullName)"
             $jiraAttachmentUrl
+          )
 
+          $curlOutput = & curl.exe @curlArguments
           $curlExitCode = $LASTEXITCODE
 
+          Write-Host $curlOutput
+
           if ($curlExitCode -ne 0) {
-
-            Write-Host ''
-            Write-Host 'Jira response:'
-            Write-Host $curlOutput
-
             throw (
               'Jira attachment upload failed. ' +
               "curl exit code: $curlExitCode"
             )
           }
 
-          Write-Host ''
-          Write-Host 'Jira response:'
-          Write-Host $curlOutput
-
           "JIRA_REPORT_ATTACHED=true" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'TESTGUIDE REPORT ATTACHED TO JIRA'
-          Write-Host '========================================'
-          Write-Host "Issue : $env:JIRA_KEY"
-          Write-Host "File  : $($fileInfo.Name)"
-          Write-Host '========================================'
-
-
-      # ==========================================================
-      # 13. SUMMARY
-      # ==========================================================
+          Write-Host 'Report attached successfully.'
 
       - name: Publish execution summary
         if: always()
@@ -1241,6 +1087,7 @@ jobs:
             "| Jira | $env:JIRA_KEY |",
             "| Bench | $env:BENCH_ID |",
             "| Resource | $env:TESTGUIDE_RESOURCE |",
+            "| Configuration | $env:CONFIGURATION_FOLDER |",
             "| ECU | $env:TARGET_ECU |",
             "| Playbook ID | $env:TESTGUIDE_PLAYBOOK_ID |",
             "| Execution Task | $env:TESTGUIDE_TASK_ID |",
