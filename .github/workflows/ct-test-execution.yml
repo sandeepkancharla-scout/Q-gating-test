@@ -59,26 +59,30 @@ jobs:
           }
 
           foreach ($item in $required.GetEnumerator()) {
-            if ([string]::IsNullOrWhiteSpace([string]$item.Value)) {
+            $value = "$($item.Value)".Trim()
+
+            if (-not $value) {
               throw "Missing required value: $($item.Key)"
             }
           }
 
-          [int]$projectId = 0
-
-          if (
-            -not [int]::TryParse(
-              $env:ONECX_PROJECT_ID,
-              [ref]$projectId
-            )
-          ) {
+          try {
+            $projectId = [int]$env:ONECX_PROJECT_ID
+          }
+          catch {
             throw 'ONECX_PROJECT_ID must be an integer.'
           }
 
-          Write-Host "Jira=$env:JIRA_KEY"
-          Write-Host "Bench=$env:BENCH_ID"
-          Write-Host "ECU=$env:TARGET_ECU"
-          Write-Host "Project=$projectId"
+          Write-Host '========================================'
+          Write-Host 'REQUEST'
+          Write-Host '========================================'
+          Write-Host "Jira       : $env:JIRA_KEY"
+          Write-Host "Bench      : $env:BENCH_ID"
+          Write-Host "Bench Name : $env:BENCH_NAME"
+          Write-Host "ECU        : $env:TARGET_ECU"
+          Write-Host "Playbook   : $env:PLAYBOOK_NAME"
+          Write-Host "Project ID : $projectId"
+          Write-Host '========================================'
 
 
       - name: Resolve resource and paths
@@ -86,7 +90,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $bench = $env:BENCH_ID.Trim().ToUpperInvariant()
+          $bench = "$env:BENCH_ID".Trim().ToUpperInvariant()
           $resource = ''
           $root = ''
 
@@ -164,19 +168,19 @@ jobs:
             }
 
             default {
-              $resource = ([string]$env:RESOURCE_NAME).Trim()
+              $resource = "$env:RESOURCE_NAME".Trim()
 
-              if ([string]::IsNullOrWhiteSpace($resource)) {
-                throw "No resource mapping for BENCH_ID=$bench"
+              if (-not $resource) {
+                throw "No ONE.CX resource mapping exists for BENCH_ID=$bench."
               }
 
               $root = 'C:\HIL\Testing\eeint-Test-Automation'
             }
           }
 
-          $configuration = $env:CONFIGURATION_FOLDER.Trim()
-          $ecu = $env:TARGET_ECU.Trim()
-          $package = $env:BENCH_NAME.Trim()
+          $configuration = "$env:CONFIGURATION_FOLDER".Trim()
+          $ecu = "$env:TARGET_ECU".Trim()
+          $package = "$env:BENCH_NAME".Trim()
 
           $xilIdentifier = (
             "novi_hq/1stfloor/ee_lab_novi/" +
@@ -299,21 +303,21 @@ jobs:
             parameters = @()
           }
 
-          $file = Join-Path `
+          $playbookFile = Join-Path `
             $env:RUNNER_TEMP `
             'testguide-playbook.json'
 
           $playbook |
             ConvertTo-Json -Depth 30 |
             Set-Content `
-              -LiteralPath $file `
+              -LiteralPath $playbookFile `
               -Encoding utf8
 
-          if (-not (Test-Path -LiteralPath $file)) {
+          if (-not (Test-Path -LiteralPath $playbookFile)) {
             throw 'Playbook file was not created.'
           }
 
-          "TESTGUIDE_PLAYBOOK_FILE=$file" |
+          "TESTGUIDE_PLAYBOOK_FILE=$playbookFile" |
             Out-File `
               -FilePath $env:GITHUB_ENV `
               -Encoding utf8 `
@@ -327,7 +331,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $folder = [uri]::EscapeDataString('/')
+          $folder = '%2F'
 
           $url = (
             "$env:ONECX_URL/api/v2/execution/playbook" +
@@ -352,13 +356,9 @@ jobs:
             -Body $body `
             -ErrorAction Stop
 
-          $playbookId = (
-            [convert]::ToString(
-              $response.playbookId
-            )
-          ).Trim()
+          $playbookId = "$($response.playbookId)".Trim()
 
-          if ([string]::IsNullOrWhiteSpace($playbookId)) {
+          if (-not $playbookId) {
             throw 'Upload did not return playbookId.'
           }
 
@@ -411,10 +411,8 @@ jobs:
             }
           }
 
-          $requestJson = (
-            $request |
+          $requestJson = $request |
             ConvertTo-Json -Depth 20
-          )
 
           $response = Invoke-RestMethod `
             -Method POST `
@@ -430,13 +428,9 @@ jobs:
             throw 'Execution did not return taskIds.'
           }
 
-          $taskId = (
-            [convert]::ToString(
-              $taskIds[0]
-            )
-          ).Trim()
+          $taskId = "$($taskIds[0])".Trim()
 
-          if ([string]::IsNullOrWhiteSpace($taskId)) {
+          if (-not $taskId) {
             throw 'Execution returned an empty taskId.'
           }
 
@@ -456,9 +450,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $taskId = $env:TESTGUIDE_TASK_ID.Trim()
+          $taskId = "$env:TESTGUIDE_TASK_ID".Trim()
 
-          if ([string]::IsNullOrWhiteSpace($taskId)) {
+          if (-not $taskId) {
             throw 'TESTGUIDE_TASK_ID is missing.'
           }
 
@@ -499,7 +493,9 @@ jobs:
           while ((Get-Date) -lt $deadline) {
             $attempt++
 
-           `
+            try {
+              $task = Invoke-RestMethod `
+                -Method GET `
                 -Uri $url `
                 -Headers $headers `
                 -ErrorAction Stop
@@ -521,7 +517,7 @@ jobs:
                 $attempt -le 12
               ) {
                 Write-Host (
-                  "Task $taskId not available yet. " +
+                  "Task $taskId is not available yet. " +
                   "Retrying in 5 seconds."
                 )
 
@@ -532,16 +528,13 @@ jobs:
               throw
             }
 
-            $state = (
-              :ToString(
-                $task.state
-              )
-            ).Trim().ToUpperInvariant()
+            $state = "$($task.state)".Trim().ToUpperInvariant()
+            $verdict = "$($task.aggregatedVerdict)".Trim()
 
             Write-Host (
               "Attempt=$attempt " +
               "State=$state " +
-              "Verdict=$($task.aggregatedVerdict)"
+              "Verdict=$verdict"
             )
 
             if ($state -in $successStates) {
@@ -567,21 +560,12 @@ jobs:
             throw 'Execution polling timed out.'
           }
 
-          $startDate = (
-            :ToString(
-              $task.startDate
-            )
-          ).Trim()
-
-          $endDate = (
-            :ToString(
-              $task.endDate
-            )
-          ).Trim()
+          $startDate = "$($task.startDate)".Trim()
+          $endDate = "$($task.endDate)".Trim()
 
           if (
-            :IsNullOrWhiteSpace($startDate) -or
-            :IsNullOrWhiteSpace($endDate)
+            -not $startDate -or
+            -not $endDate
           ) {
             throw 'Completed task has no startDate or endDate.'
           }
@@ -611,17 +595,8 @@ jobs:
             'Accept' = 'application/json'
           }
 
-          $culture = [globalization.CultureInfo]::InvariantCulture
-
-          $taskStart = :Parse(
-            $env:TASK_START_DATE,
-            $culture
-          )
-
-          $taskEnd = :Parse(
-            $env:TASK_END_DATE,
-            $culture
-          )
+          $taskStart = Get-Date $env:TASK_START_DATE
+          $taskEnd = Get-Date $env:TASK_END_DATE
 
           $windowStart = $taskStart.AddMinutes(-2)
           $windowEnd = $taskEnd.AddMinutes(20)
@@ -637,27 +612,19 @@ jobs:
           while ((Get-Date) -lt $deadline) {
             $attempt++
 
-            $startText = $windowStart.ToString(
+            $startDate = $windowStart.ToString(
               'yyyy-MM-ddTHH:mm:ss.fffZ'
             )
 
-            $endText = $windowEnd.ToString(
+            $endDate = $windowEnd.ToString(
               'yyyy-MM-ddTHH:mm:ss.fffZ'
-            )
-
-            $startEncoded = :EscapeDataString(
-              $startText
-            )
-
-            $endEncoded = :EscapeDataString(
-              $endText
             )
 
             $url = (
               "$env:ONECX_URL/api/report/reports/history" +
               "?projectId=$env:ONECX_PROJECT_ID" +
-              "&startDate=$startEncoded" +
-              "&endDate=$endEncoded" +
+              "&startDate=$startDate" +
+              "&endDate=$endDate" +
               "&offset=0" +
               "&limit=100"
             )
@@ -678,36 +645,21 @@ jobs:
             $matches = @(
               $reports |
                 Where-Object {
-                  $name = (
-                    :ToString(
-                      $_.testPlanName
-                    )
-                  ).Trim()
+                  $name = "$($_.testPlanName)".Trim()
 
                   $status = (
-                    :ToString(
-                      $_.status
-                    )
-                  ).Trim().ToUpperInvariant()
+                    "$($_.status)".Trim().ToUpperInvariant()
+                  )
 
                   $executionText = (
-                    :ToString(
-                      $_.executionDate
-                    )
-                  ).Trim()
+                    "$($_.executionDate)".Trim()
+                  )
 
-                  if (
-                    :IsNullOrWhiteSpace(
-                      $executionText
-                    )
-                  ) {
+                  if (-not $executionText) {
                     return $false
                   }
 
-                  $executionDate = :Parse(
-                    $executionText,
-                    $culture
-                  )
+                  $executionDate = Get-Date $executionText
 
                   return (
                     $name -ieq $expectedPlan -and
@@ -717,12 +669,7 @@ jobs:
                   )
                 } |
                 Sort-Object {
-                  :Parse(
-                    :ToString(
-                      $_.uploadDate
-                    ),
-                    $culture
-                  )
+                  Get-Date "$($_.uploadDate)"
                 } -Descending
             )
 
@@ -741,13 +688,9 @@ jobs:
             )
           }
 
-          $reportId = (
-            :ToString(
-              $selectedReport.reportId
-            )
-          ).Trim()
+          $reportId = "$($selectedReport.reportId)".Trim()
 
-          if (:IsNullOrWhiteSpace($reportId)) {
+          if (-not $reportId) {
             throw 'Selected TestGuide report has no reportId.'
           }
 
@@ -777,9 +720,11 @@ jobs:
             'Accept' = 'application/json'
           }
 
-          $reportId = :EscapeDataString(
-            $env:TESTGUIDE_REPORT_ID
-          )
+          $reportId = "$env:TESTGUIDE_REPORT_ID".Trim()
+
+          if (-not $reportId) {
+            throw 'TESTGUIDE_REPORT_ID is missing.'
+          }
 
           $url = (
             "$env:ONECX_URL/api/report/export/atx/" +
@@ -793,13 +738,9 @@ jobs:
             -Headers $headers `
             -ErrorAction Stop
 
-          $taskId = (
-            :ToString(
-              $response.taskId
-            )
-          ).Trim()
+          $taskId = "$($response.taskId)".Trim()
 
-          if (:IsNullOrWhiteSpace($taskId)) {
+          if (-not $taskId) {
             throw 'ATX export did not return taskId.'
           }
 
@@ -824,9 +765,11 @@ jobs:
             'Accept' = 'application/json'
           }
 
-          $taskId = :EscapeDataString(
-            $env:ATX_EXPORT_TASK_ID
-          )
+          $taskId = "$env:ATX_EXPORT_TASK_ID".Trim()
+
+          if (-not $taskId) {
+            throw 'ATX_EXPORT_TASK_ID is missing.'
+          }
 
           $url = (
             "$env:ONECX_URL/api/report/export/atx/" +
@@ -875,22 +818,18 @@ jobs:
 
             if ($null -ne $response.state) {
               $state = (
-                :ToString(
-                  $response.state
-                )
-              ).Trim().ToUpperInvariant()
+                "$($response.state)".Trim().ToUpperInvariant()
+              )
             }
             elseif ($null -ne $response.status) {
               $state = (
-                :ToString(
-                  $response.status
-                )
-              ).Trim().ToUpperInvariant()
+                "$($response.status)".Trim().ToUpperInvariant()
+              )
             }
             elseif ($response -is [string]) {
               $state = (
-                $response.Trim().Trim('"')
-              ).ToUpperInvariant()
+                $response.Trim().Trim('"').ToUpperInvariant()
+              )
             }
 
             Write-Host "ATX export state=$state"
@@ -929,11 +868,9 @@ jobs:
             throw 'ATX export is not complete.'
           }
 
-          if (
-            :IsNullOrWhiteSpace(
-              $env:ATX_EXPORT_TASK_ID
-            )
-          ) {
+          $taskId = "$env:ATX_EXPORT_TASK_ID".Trim()
+
+          if (-not $taskId) {
             throw 'ATX_EXPORT_TASK_ID is missing.'
           }
 
@@ -953,10 +890,6 @@ jobs:
             $env:RUNNER_TEMP `
             "${safeJira}_${safeEcu}_ATX_Export.zip"
 
-          $taskId = :EscapeDataString(
-            $env:ATX_EXPORT_TASK_ID
-          )
-
           $downloadUrl = (
             "$env:ONECX_URL/api/report/export/atx/" +
             "$taskId/download"
@@ -970,7 +903,7 @@ jobs:
           Write-Host 'DOWNLOAD TESTGUIDE REPORT'
           Write-Host '========================================'
           Write-Host "Report ID : $env:TESTGUIDE_REPORT_ID"
-          Write-Host "Task ID   : $env:ATX_EXPORT_TASK_ID"
+          Write-Host "Task ID   : $taskId"
           Write-Host "URL       : $downloadUrl"
           Write-Host "File      : $reportFile"
           Write-Host '========================================'
@@ -1023,11 +956,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          if (
-            :IsNullOrWhiteSpace(
-              $env:JFROG_TOKEN
-            )
-          ) {
+          if (-not "$env:JFROG_TOKEN".Trim()) {
             throw 'JFROG_TOKEN is missing.'
           }
 
