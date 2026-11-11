@@ -87,19 +87,19 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           $bench = $env:BENCH_ID.Trim().ToUpperInvariant()
-          $resourceName = ''
-          $workspaceRoot = ''
+          $resource = ''
+          $root = ''
 
           switch ($bench) {
             { $_ -in @('SYSHIL1', 'SYSHIL1-LABTEST1') } {
-              $resourceName = 'syshil1-labtest1'
-              $workspaceRoot = 'D:\HIL\Testing\eeint-Test-Automation'
+              $resource = 'syshil1-labtest1'
+              $root = 'D:\HIL\Testing\eeint-Test-Automation'
               break
             }
 
             { $_ -in @('SYSHIL2', 'SYSHIL2-LABTEST2') } {
-              $resourceName = 'syshil2-labtest2'
-              $workspaceRoot = 'C:\HIL\Testing\eeint-Test-Automation'
+              $resource = 'syshil2-labtest2'
+              $root = 'C:\HIL\Testing\eeint-Test-Automation'
               break
             }
 
@@ -110,8 +110,8 @@ jobs:
                 'SUBSYSINFO1-INFOTEST1'
               )
             } {
-              $resourceName = 'subsysinfo1-infotest1'
-              $workspaceRoot = 'C:\HIL\Testing\eeint-Test-Automation'
+              $resource = 'subsysinfo1-infotest1'
+              $root = 'C:\HIL\Testing\eeint-Test-Automation'
               break
             }
 
@@ -122,8 +122,8 @@ jobs:
                 'SUBSYSINFO2-INFOTEST2'
               )
             } {
-              $resourceName = 'subsysinfo2-infotest2'
-              $workspaceRoot = 'C:\HIL\Testing\eeint-Test-Automation'
+              $resource = 'subsysinfo2-infotest2'
+              $root = 'C:\HIL\Testing\eeint-Test-Automation'
               break
             }
 
@@ -134,8 +134,8 @@ jobs:
                 'SUBSYSTHERMAL1-THERMALTEST1'
               )
             } {
-              $resourceName = 'subsysthermal1-thermaltest1'
-              $workspaceRoot = 'C:\HIL\Testing\eeint-Test-Automation'
+              $resource = 'subsysthermal1-thermaltest1'
+              $root = 'C:\HIL\Testing\eeint-Test-Automation'
               break
             }
 
@@ -146,8 +146,8 @@ jobs:
                 'SUBSYSCHARGING1-LABTEST6'
               )
             } {
-              $resourceName = 'subsyscharging1-labtest6'
-              $workspaceRoot = 'C:\HIL\Testing\eeint-Test-Automation'
+              $resource = 'subsyscharging1-labtest6'
+              $root = 'C:\HIL\Testing\eeint-Test-Automation'
               break
             }
 
@@ -158,52 +158,52 @@ jobs:
                 'MICROBENCHINFO-MICROBENCHHIL1'
               )
             } {
-              $resourceName = 'microbenchinfo-microbenchhil1'
-              $workspaceRoot = 'C:\HIL\Testing\eeint-Test-Automation'
+              $resource = 'microbenchinfo-microbenchhil1'
+              $root = 'C:\HIL\Testing\eeint-Test-Automation'
               break
             }
 
             default {
-              $resourceName = ([string]$env:RESOURCE_NAME).Trim()
+              $resource = ([string]$env:RESOURCE_NAME).Trim()
 
-              if ([string]::IsNullOrWhiteSpace($resourceName)) {
-                throw "No ONE.CX resource mapping exists for BENCH_ID=$bench."
+              if ([string]::IsNullOrWhiteSpace($resource)) {
+                throw "No resource mapping for BENCH_ID=$bench"
               }
 
-              $workspaceRoot = 'C:\HIL\Testing\eeint-Test-Automation'
+              $root = 'C:\HIL\Testing\eeint-Test-Automation'
             }
           }
 
-          $configurationFolder = $env:CONFIGURATION_FOLDER.Trim()
+          $configuration = $env:CONFIGURATION_FOLDER.Trim()
           $ecu = $env:TARGET_ECU.Trim()
-          $benchPackage = $env:BENCH_NAME.Trim()
+          $package = $env:BENCH_NAME.Trim()
 
           $xilIdentifier = (
             "novi_hq/1stfloor/ee_lab_novi/" +
-            "$resourceName/ControlComputer"
+            "$resource/ControlComputer"
           )
 
-          $ecuTestStepName = "ecu.test $resourceName Start"
+          $ecuTestStepName = "ecu.test $resource Start"
 
           $tbcPath = (
-            "Configurations\$configurationFolder\" +
-            "${configurationFolder}_TestBenchConfig.tbc"
+            "Configurations\$configuration\" +
+            "${configuration}_TestBenchConfig.tbc"
           )
 
           $tcfPath = (
-            "Configurations\$configurationFolder\" +
-            "${configurationFolder}_TestConfig.tcf"
+            "Configurations\$configuration\" +
+            "${configuration}_TestConfig.tcf"
           )
 
           $projectPath = (
-            "Packages\$benchPackage\L2_Quality_Gate\" +
+            "Packages\$package\L2_Quality_Gate\" +
             "$ecu\" +
             "${ecu}_L2QualityGate.prj"
           )
 
           @(
-            "TESTGUIDE_RESOURCE=$resourceName"
-            "TESTGUIDE_ROOT=$workspaceRoot"
+            "TESTGUIDE_RESOURCE=$resource"
+            "TESTGUIDE_ROOT=$root"
             "XIL_IDENTIFIER=$xilIdentifier"
             "ECUTEST_STEP_NAME=$ecuTestStepName"
             "TBC_RELATIVE_PATH=$tbcPath"
@@ -219,9 +219,9 @@ jobs:
           Write-Host 'RESOURCE AND PATHS'
           Write-Host '========================================'
           Write-Host "Bench      : $bench"
-          Write-Host "Resource   : $resourceName"
-          Write-Host "Workspace  : $workspaceRoot"
-          Write-Host "Config     : $configurationFolder"
+          Write-Host "Resource   : $resource"
+          Write-Host "Workspace  : $root"
+          Write-Host "Config     : $configuration"
           Write-Host "Identifier : $xilIdentifier"
           Write-Host "TBC        : $tbcPath"
           Write-Host "TCF        : $tcfPath"
@@ -246,6 +246,7 @@ jobs:
                 path = $env:TESTGUIDE_ROOT
                 sourceType = 'location'
               }
+
               dependencies = @()
             }
 
@@ -298,21 +299,21 @@ jobs:
             parameters = @()
           }
 
-          $playbookFile = Join-Path `
+          $file = Join-Path `
             $env:RUNNER_TEMP `
             'testguide-playbook.json'
 
           $playbook |
             ConvertTo-Json -Depth 30 |
             Set-Content `
-              -LiteralPath $playbookFile `
+              -LiteralPath $file `
               -Encoding utf8
 
-          if (-not (Test-Path -LiteralPath $playbookFile)) {
+          if (-not (Test-Path -LiteralPath $file)) {
             throw 'Playbook file was not created.'
           }
 
-          "TESTGUIDE_PLAYBOOK_FILE=$playbookFile" |
+          "TESTGUIDE_PLAYBOOK_FILE=$file" |
             Out-File `
               -FilePath $env:GITHUB_ENV `
               -Encoding utf8 `
@@ -401,15 +402,19 @@ jobs:
               analysisExecutionMode = 'sequential'
               downstreamAnalysisPartitioning = 'analysis'
               expirationTimeInMinutes = 60
+
               issueTrackerTickets = @(
                 "$env:JIRA_URL/browse/$env:JIRA_KEY"
               )
+
               remainingRetriesOnError = 0
             }
           }
 
-          $requestJson = $request |
+          $requestJson = (
+            $request |
             ConvertTo-Json -Depth 20
+          )
 
           $response = Invoke-RestMethod `
             -Method POST `
@@ -451,15 +456,11 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          if (
-            [string]::IsNullOrWhiteSpace(
-              $env:TESTGUIDE_TASK_ID
-            )
-          ) {
+          $taskId = $env:TESTGUIDE_TASK_ID.Trim()
+
+          if ([string]::IsNullOrWhiteSpace($taskId)) {
             throw 'TESTGUIDE_TASK_ID is missing.'
           }
-
-          $taskId = $env:TESTGUIDE_TASK_ID.Trim()
 
           $url = (
             "$env:ONECX_URL/api/v2/execution/task/" +
@@ -498,8 +499,8 @@ jobs:
           while ((Get-Date) -lt $deadline) {
             $attempt++
 
-            try {
-             ri $url `
+           `
+                -Uri $url `
                 -Headers $headers `
                 -ErrorAction Stop
             }
@@ -610,9 +611,7 @@ jobs:
             'Accept' = 'application/json'
           }
 
-          $culture = (
-            [globalization.CultureInfo]::InvariantCulture
-          )
+          $culture = [globalization.CultureInfo]::InvariantCulture
 
           $taskStart = :Parse(
             $env:TASK_START_DATE,
@@ -632,7 +631,7 @@ jobs:
           )
 
           $deadline = (Get-Date).AddMinutes(15)
-          $selected = $null
+          $selectedReport = $null
           $attempt = 0
 
           while ((Get-Date) -lt $deadline) {
@@ -728,7 +727,7 @@ jobs:
             )
 
             if ($matches.Count -gt 0) {
-              $selected = $matches[0]
+              $selectedReport = $matches[0]
               break
             }
 
@@ -736,7 +735,7 @@ jobs:
             Start-Sleep -Seconds 15
           }
 
-          if ($null -eq $selected) {
+          if ($null -eq $selectedReport) {
             throw (
               "No TestGuide report found for $expectedPlan."
             )
@@ -744,7 +743,7 @@ jobs:
 
           $reportId = (
             :ToString(
-              $selected.reportId
+              $selectedReport.reportId
             )
           ).Trim()
 
@@ -754,9 +753,9 @@ jobs:
 
           @(
             "TESTGUIDE_REPORT_ID=$reportId"
-            "TESTGUIDE_REPORT_PLAN=$($selected.testPlanName)"
-            "TESTGUIDE_REPORT_EXECUTION_DATE=$($selected.executionDate)"
-            "TESTGUIDE_REPORT_UPLOAD_DATE=$($selected.uploadDate)"
+            "TESTGUIDE_REPORT_PLAN=$($selectedReport.testPlanName)"
+            "TESTGUIDE_REPORT_EXECUTION_DATE=$($selectedReport.executionDate)"
+            "TESTGUIDE_REPORT_UPLOAD_DATE=$($selectedReport.uploadDate)"
           ) |
             Out-File `
               -FilePath $env:GITHUB_ENV `
@@ -858,19 +857,15 @@ jobs:
           $ready = $false
 
           while ((Get-Date) -lt $deadline) {
-            $status = Invoke-RestMethod `
+            $response = Invoke-RestMethod `
               -Method GET `
               -Uri $url `
               -Headers $headers `
               -ErrorAction Stop
 
-            $status |
-              ConvertTo-Json -Depth 20 |
-              Write-Host
-
             if (
-              $null -ne $status.done -and
-              [bool]$status.done
+              $null -ne $response.done -and
+              [bool]$response.done
             ) {
               $ready = $true
               break
@@ -878,25 +873,27 @@ jobs:
 
             $state = ''
 
-            if ($null -ne $status.state) {
+            if ($null -ne $response.state) {
               $state = (
                 :ToString(
-                  $status.state
+                  $response.state
                 )
               ).Trim().ToUpperInvariant()
             }
-            elseif ($null -ne $status.status) {
+            elseif ($null -ne $response.status) {
               $state = (
                 :ToString(
-                  $status.status
+                  $response.status
                 )
               ).Trim().ToUpperInvariant()
             }
-            elseif ($status -is [string]) {
+            elseif ($response -is [string]) {
               $state = (
-                $status.Trim().Trim('"')
+                $response.Trim().Trim('"')
               ).ToUpperInvariant()
             }
+
+            Write-Host "ATX export state=$state"
 
             if ($state -in $successStates) {
               $ready = $true
@@ -1031,14 +1028,10 @@ jobs:
               $env:JFROG_TOKEN
             )
           ) {
-            throw 'JFROG_TOKEN secret is missing.'
+            throw 'JFROG_TOKEN is missing.'
           }
 
-          if (
-            -not (
-              Test-Path -LiteralPath $env:TESTGUIDE_ATX_FILE
-            )
-          ) {
+          if (-not (Test-Path -LiteralPath $env:TESTGUIDE_ATX_FILE)) {
             throw (
               "TestGuide report does not exist: " +
               "$env:TESTGUIDE_ATX_FILE"
