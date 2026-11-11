@@ -39,14 +39,11 @@ jobs:
 
     steps:
 
-      # ==========================================================
-      # VALIDATE REQUEST
-      # ==========================================================
-
       - name: Validate request
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+          JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
         run: |
           $ErrorActionPreference = 'Stop'
 
@@ -59,14 +56,11 @@ jobs:
             PLAYBOOK_NAME = $env:PLAYBOOK_NAME
             ONECX_PROJECT_ID = $env:ONECX_PROJECT_ID
             ONECX_AUTH_KEY = $env:ONECX_AUTH_KEY
+            JFROG_TOKEN = $env:JFROG_TOKEN
           }
 
           foreach ($item in $required.GetEnumerator()) {
-            if (
-              [string]::IsNullOrWhiteSpace(
-                [string]$item.Value
-              )
-            ) {
+            if ([string]::IsNullOrWhiteSpace([string]$item.Value)) {
               throw "Missing required value: $($item.Key)"
             }
           }
@@ -87,10 +81,6 @@ jobs:
           Write-Host "ECU=$env:TARGET_ECU"
           Write-Host "Project=$projectId"
 
-
-      # ==========================================================
-      # RESOLVE RESOURCE AND PATHS
-      # ==========================================================
 
       - name: Resolve resource and paths
         shell: pwsh
@@ -187,6 +177,7 @@ jobs:
             }
 
             default {
+
               $resourceName = (
                 [string]$env:RESOURCE_NAME
               ).Trim()
@@ -266,42 +257,6 @@ jobs:
           Write-Host '========================================'
 
 
-      # ==========================================================
-      # VALIDATE TEST CASES
-      # ==========================================================
-
-      - name: Validate test cases
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          $ids = @(
-            $env:TEST_CASES -split '[,;]' |
-              ForEach-Object {
-                $_.Trim()
-              } |
-              Where-Object {
-                -not [string]::IsNullOrWhiteSpace($_)
-              }
-          )
-
-          if ($ids.Count -eq 0) {
-            throw 'No valid Jira test case IDs.'
-          }
-
-          $normalized = $ids -join ','
-
-          "NORMALIZED_TEST_CASES=$normalized" |
-            Out-File `
-              -FilePath $env:GITHUB_ENV `
-              -Encoding utf8 `
-              -Append
-
-
-      # ==========================================================
-      # GENERATE PLAYBOOK
-      # ==========================================================
-
       - name: Generate TestGuide playbook
         shell: pwsh
         run: |
@@ -349,7 +304,6 @@ jobs:
             execution = [ordered]@{
 
               testcases = @(
-
                 [ordered]@{
                   relativePath = $env:PROJECT_RELATIVE_PATH
                   stepName = $env:ECUTEST_STEP_NAME
@@ -404,10 +358,6 @@ jobs:
               -Encoding utf8 `
               -Append
 
-
-      # ==========================================================
-      # UPLOAD PLAYBOOK
-      # ==========================================================
 
       - name: Upload TestGuide playbook
         shell: pwsh
@@ -466,10 +416,6 @@ jobs:
 
           Write-Host "Playbook ID=$playbookId"
 
-
-      # ==========================================================
-      # EXECUTE PLAYBOOK
-      # ==========================================================
 
       - name: Execute TestGuide playbook
         shell: pwsh
@@ -555,10 +501,6 @@ jobs:
           Write-Host "Execution Task ID=$taskId"
 
 
-      # ==========================================================
-      # POLL EXECUTION
-      # ==========================================================
-
       - name: Poll TestGuide execution
         shell: pwsh
         env:
@@ -566,24 +508,13 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          if (
-            [string]::IsNullOrWhiteSpace(
-              $env:TESTGUIDE_TASK_ID
-            )
-          ) {
-            throw 'TESTGUIDE_TASK_ID is missing.'
-          }
-
           $taskId = $env:TESTGUIDE_TASK_ID.Trim()
 
           $url = (
             "$env:ONECX_URL/api/v2/execution/task/" +
-            $taskId +
-            "?projectId=" +
-            $env:ONECX_PROJECT_ID
+            "$taskId" +
+            "?projectId=$env:ONECX_PROJECT_ID"
           )
-
-          Write-Host "Task URL=$url"
 
           $headers = @{
             'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
@@ -642,8 +573,9 @@ jobs:
                 $statusCode -eq 404 -and
                 $attempt -le 12
               ) {
+
                 Write-Host (
-                  "Task $taskId not available yet. " +
+                  "Task not available yet. " +
                   "Retrying in 5 seconds."
                 )
 
@@ -721,10 +653,6 @@ jobs:
               -Append
 
 
-      # ==========================================================
-      # FIND TESTGUIDE REPORT
-      # ==========================================================
-
       - name: Find current TestGuide report
         shell: pwsh
         env:
@@ -741,14 +669,18 @@ jobs:
             [globalization.CultureInfo]::InvariantCulture
           )
 
-          $taskStart = [datetime]::Parse(
-            $env:TASK_START_DATE,
-            $culture
+          $taskStart = (
+            [datetime]::Parse(
+              $env:TASK_START_DATE,
+              $culture
+            )
           )
 
-          $taskEnd = [datetime]::Parse(
-            $env:TASK_END_DATE,
-            $culture
+          $taskEnd = (
+            [datetime]::Parse(
+              $env:TASK_END_DATE,
+              $culture
+            )
           )
 
           $windowStart = $taskStart.AddMinutes(-2)
@@ -761,26 +693,31 @@ jobs:
           $deadline = (Get-Date).AddMinutes(15)
 
           $selected = $null
-          $attempt = 0
 
           while ((Get-Date) -lt $deadline) {
 
-            $attempt++
-
-            $startText = $windowStart.ToString(
-              'yyyy-MM-ddTHH:mm:ss.fffZ'
+            $startText = (
+              $windowStart.ToString(
+                'yyyy-MM-ddTHH:mm:ss.fffZ'
+              )
             )
 
-            $endText = $windowEnd.ToString(
-              'yyyy-MM-ddTHH:mm:ss.fffZ'
+            $endText = (
+              $windowEnd.ToString(
+                'yyyy-MM-ddTHH:mm:ss.fffZ'
+              )
             )
 
-            $startEncoded = [uri]::EscapeDataString(
-              $startText
+            $startEncoded = (
+              [uri]::EscapeDataString(
+                $startText
+              )
             )
 
-            $endEncoded = [uri]::EscapeDataString(
-              $endText
+            $endEncoded = (
+              [uri]::EscapeDataString(
+                $endText
+              )
             )
 
             $url = (
@@ -790,11 +727,6 @@ jobs:
               "&endDate=$endEncoded" +
               "&offset=0" +
               "&limit=100"
-            )
-
-            Write-Host (
-              "Report attempt=$attempt " +
-              "Plan=$expectedPlan"
             )
 
             $response = Invoke-RestMethod `
@@ -835,9 +767,11 @@ jobs:
                     return $false
                   }
 
-                  $executionDate = [datetime]::Parse(
-                    $executionText,
-                    $culture
+                  $executionDate = (
+                    [datetime]::Parse(
+                      $executionText,
+                      $culture
+                    )
                   )
 
                   return (
@@ -862,7 +796,7 @@ jobs:
               break
             }
 
-            Write-Host 'Report not imported yet.'
+            Write-Host 'Waiting for TestGuide report.'
 
             Start-Sleep -Seconds 15
           }
@@ -898,12 +832,8 @@ jobs:
               -Encoding utf8 `
               -Append
 
-          Write-Host "TestGuide Report ID=$reportId"
+          Write-Host "Report ID=$reportId"
 
-
-      # ==========================================================
-      # START ATX EXPORT
-      # ==========================================================
 
       - name: Start ATX export
         shell: pwsh
@@ -917,8 +847,10 @@ jobs:
             'Accept' = 'application/json'
           }
 
-          $reportId = [uri]::EscapeDataString(
-            $env:TESTGUIDE_REPORT_ID
+          $reportId = (
+            [uri]::EscapeDataString(
+              $env:TESTGUIDE_REPORT_ID
+            )
           )
 
           $url = (
@@ -956,10 +888,6 @@ jobs:
           Write-Host "ATX Export Task=$taskId"
 
 
-      # ==========================================================
-      # POLL ATX EXPORT
-      # ==========================================================
-
       - name: Poll ATX export
         shell: pwsh
         env:
@@ -972,8 +900,10 @@ jobs:
             'Accept' = 'application/json'
           }
 
-          $taskId = [uri]::EscapeDataString(
-            $env:ATX_EXPORT_TASK_ID
+          $taskId = (
+            [uri]::EscapeDataString(
+              $env:ATX_EXPORT_TASK_ID
+            )
           )
 
           $url = (
@@ -1011,10 +941,6 @@ jobs:
               -Uri $url `
               -Headers $headers `
               -ErrorAction Stop
-
-            $status |
-              ConvertTo-Json -Depth 20 |
-              Write-Host
 
             if (
               $null -ne $status.done -and
@@ -1063,30 +989,21 @@ jobs:
             Start-Sleep -Seconds 5
           }
 
-          if (-not $ready) {
-            throw 'ATX export timed out.'
-          }
-
-          "ATX_EXPORT_STATE=COMPLETED" |
-            Out-File `
-              -FilePath $env:GITHUB_ENV `
-              -Encoding utf8 `
-              -Append
-
-
-      # ==========================================================
-      # DOWNLOAD TESTGUIDE REPORT
-      # ==========================================================
-
-      - name: Download TestGuide report
-        shell: pwsh
-        env:
+          if (-not $ready:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
         run: |
           $ErrorActionPreference = 'Stop'
 
           if ($env:ATX_EXPORT_STATE -ne 'COMPLETED') {
             throw 'ATX export is not complete.'
+          }
+
+          if (
+            :IsNullOrWhiteSpace(
+              $env:ATX_EXPORT_TASK_ID
+            )
+          ) {
+            throw 'ATX_EXPORT_TASK_ID is missing.'
           }
 
           $safeJira = (
@@ -1101,15 +1018,17 @@ jobs:
             '_'
           )
 
-          $temporaryFile = Join-Path `
+          $reportFile = Join-Path `
             $env:RUNNER_TEMP `
-            "${safeJira}_${safeEcu}_ATX_Export.bin"
+            "${safeJira}_${safeEcu}_ATX_Export.zip"
 
-          $taskId = [uri]::EscapeDataString(
-            $env:ATX_EXPORT_TASK_ID
+          $taskId = (
+            :EscapeDataString(
+              $env:ATX_EXPORT_TASK_ID
+            )
           )
 
-          $url = (
+          $downloadUrl = (
             "$env:ONECX_URL/api/report/export/atx/" +
             "$taskId/download"
           )
@@ -1118,92 +1037,50 @@ jobs:
             'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
           }
 
+          Write-Host '========================================'
+          Write-Host 'DOWNLOAD TESTGUIDE REPORT'
+          Write-Host '========================================'
+          Write-Host "Report ID : $env:TESTGUIDE_REPORT_ID"
+          Write-Host "Task ID   : $env:ATX_EXPORT_TASK_ID"
+          Write-Host "URL       : $downloadUrl"
+          Write-Host "File      : $reportFile"
+          Write-Host '========================================'
+
           Invoke-WebRequest `
             -Method GET `
-            -Uri $url `
+            -Uri $downloadUrl `
             -Headers $headers `
-            -OutFile $temporaryFile `
+            -OutFile $reportFile `
             -ErrorAction Stop
 
           if (
             -not (
-              Test-Path -LiteralPath $temporaryFile
+              Test-Path -LiteralPath $reportFile
             )
           ) {
             throw 'TestGuide report was not downloaded.'
           }
 
-          $downloadInfo = Get-Item `
-            -LiteralPath $temporaryFile
+          $fileInfo = Get-Item `
+            -LiteralPath $reportFile
 
-          if ($downloadInfo.Length -eq 0) {
-            throw 'TestGuide report is empty.'
+          if ($fileInfo.Length -eq 0) {
+            throw 'Downloaded TestGuide report is empty.'
           }
-
-          $bytes = [io.file]::ReadAllBytes(
-            $temporaryFile
-          )
-
-          $signatureLength = [math]::Min(
-            4,
-            $bytes.Length
-          )
-
-          $signature = [text.encoding]::ASCII.GetString(
-            $bytes,
-            0,
-            $signatureLength
-          )
-
-          if ($signature.StartsWith('PK')) {
-
-            $finalFile = Join-Path `
-              $env:RUNNER_TEMP `
-             gth
-            )
-
-            if (
-              $preview.TrimStart().StartsWith('{') -or
-              $preview.TrimStart().StartsWith('<html') -or
-              $preview.TrimStart().StartsWith('<!DOCTYPE html')
-            ) {
-              Write-Host $preview
-              throw 'TestGuide download returned JSON or HTML.'
-            }
-
-            $finalFile = Join-Path `
-              $env:RUNNER_TEMP `
-              "${safeJira}_${safeEcu}_ATX_Export.atx"
-
-            $exportType = 'ATX'
-          }
-
-          Move-Item `
-            -LiteralPath $temporaryFile `
-            -Destination $finalFile `
-            -Force
-
-          $finalInfo = Get-Item `
-            -LiteralPath $finalFile
 
           @(
-            "TESTGUIDE_ATX_FILE=$finalFile"
-            "TESTGUIDE_ATX_EXPORT_TYPE=$exportType"
-            "TESTGUIDE_ATX_SIZE=$($finalInfo.Length)"
+            "TESTGUIDE_ATX_FILE=$reportFile"
+            "TESTGUIDE_ATX_EXPORT_TYPE=ZIP"
+            "TESTGUIDE_ATX_SIZE=$($fileInfo.Length)"
           ) |
             Out-File `
               -FilePath $env:GITHUB_ENV `
               -Encoding utf8 `
               -Append
 
-          Write-Host "Report=$finalFile"
-          Write-Host "Type=$exportType"
-          Write-Host "Size=$($finalInfo.Length)"
+          Write-Host "Report=$reportFile"
+          Write-Host "Size=$($fileInfo.Length)"
 
-
-      # ==========================================================
-      # KEEP COPY IN GITHUB ACTIONS
-      # ==========================================================
 
       - name: Upload TestGuide report to GitHub Actions
         uses: actions/upload-artifact@v4
@@ -1213,10 +1090,6 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-
-      # ==========================================================
-      # UPLOAD TESTGUIDE REPORT TO JFROG
-      # ==========================================================
 
       - name: Upload TestGuide report to JFrog
         shell: pwsh
@@ -1231,14 +1104,6 @@ jobs:
             )
           ) {
             throw 'JFROG_TOKEN secret is missing.'
-          }
-
-          if (
-            :IsNullOrWhiteSpace(
-              $env:TESTGUIDE_ATX_FILE
-            )
-          ) {
-            throw 'TESTGUIDE_ATX_FILE is missing.'
           }
 
           if (
@@ -1272,7 +1137,7 @@ jobs:
           )
 
           $artifactPath = (
-            'quality-gate-reports/' +
+            "quality-gate-reports/" +
             "$safeJira/" +
             "$env:TESTGUIDE_TASK_ID/" +
             "$safeEcu/" +
@@ -1282,7 +1147,7 @@ jobs:
           $uploadUrl = (
             "$env:JFROG_URL/" +
             "$env:JFROG_REPOSITORY/" +
-            $artifactPath
+            "$artifactPath"
           )
 
           $headers = @{
@@ -1294,11 +1159,9 @@ jobs:
           Write-Host '========================================'
           Write-Host 'UPLOAD TO JFROG'
           Write-Host '========================================'
-          Write-Host "File       : $($fileInfo.FullName)"
-          Write-Host "Size       : $($fileInfo.Length)"
-          Write-Host "Repository : $env:JFROG_REPOSITORY"
-          Write-Host "Path       : $artifactPath"
-          Write-Host "URL        : $uploadUrl"
+          Write-Host "File : $($fileInfo.FullName)"
+          Write-Host "Path : $artifactPath"
+          Write-Host "URL  : $uploadUrl"
           Write-Host '========================================'
 
           $response = Invoke-WebRequest `
@@ -1335,10 +1198,6 @@ jobs:
           Write-Host "URL=$uploadUrl"
 
 
-      # ==========================================================
-      # SUMMARY
-      # ==========================================================
-
       - name: Publish execution summary
         if: always()
         shell: pwsh
@@ -1360,7 +1219,6 @@ jobs:
             "| TestGuide Report ID | $env:TESTGUIDE_REPORT_ID |"
             "| TestGuide Plan | $env:TESTGUIDE_REPORT_PLAN |"
             "| ATX Export Task | $env:ATX_EXPORT_TASK_ID |"
-            "| Export Type | $env:TESTGUIDE_ATX_EXPORT_TYPE |"
             "| Export File | $env:TESTGUIDE_ATX_FILE |"
             "| Export Size | $env:TESTGUIDE_ATX_SIZE bytes |"
             "| JFrog Path | $env:JFROG_REPORT_PATH |"
