@@ -38,6 +38,11 @@ jobs:
       JFROG_REPOSITORY: eeint-build-info
 
     steps:
+
+      # ==========================================================
+      # 1. VALIDATE
+      # ==========================================================
+
       - name: Validate request
         shell: pwsh
         env:
@@ -85,16 +90,22 @@ jobs:
           Write-Host '========================================'
 
 
+      # ==========================================================
+      # 2. RESOURCE AND PATHS
+      # ==========================================================
+
       - name: Resolve resource and paths
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
           $bench = "$env:BENCH_ID".Trim().ToUpperInvariant()
+
           $resource = ''
           $root = ''
 
           switch ($bench) {
+
             { $_ -in @('SYSHIL1', 'SYSHIL1-LABTEST1') } {
               $resource = 'syshil1-labtest1'
               $root = 'D:\HIL\Testing\eeint-Test-Automation'
@@ -179,7 +190,10 @@ jobs:
           }
 
           $configuration = "$env:CONFIGURATION_FOLDER".Trim()
+
           $ecu = "$env:TARGET_ECU".Trim()
+          $ecu = $ecu.TrimStart('_').Trim()
+
           $package = "$env:BENCH_NAME".Trim()
 
           $xilIdentifier = (
@@ -206,6 +220,7 @@ jobs:
           )
 
           @(
+            "TARGET_ECU=$ecu"
             "TESTGUIDE_RESOURCE=$resource"
             "TESTGUIDE_ROOT=$root"
             "XIL_IDENTIFIER=$xilIdentifier"
@@ -226,12 +241,17 @@ jobs:
           Write-Host "Resource   : $resource"
           Write-Host "Workspace  : $root"
           Write-Host "Config     : $configuration"
+          Write-Host "ECU        : $ecu"
           Write-Host "Identifier : $xilIdentifier"
           Write-Host "TBC        : $tbcPath"
           Write-Host "TCF        : $tcfPath"
           Write-Host "Project    : $projectPath"
           Write-Host '========================================'
 
+
+      # ==========================================================
+      # 3. GENERATE PLAYBOOK
+      # ==========================================================
 
       - name: Generate TestGuide playbook
         shell: pwsh
@@ -324,6 +344,10 @@ jobs:
               -Append
 
 
+      # ==========================================================
+      # 4. UPLOAD PLAYBOOK
+      # ==========================================================
+
       - name: Upload TestGuide playbook
         shell: pwsh
         env:
@@ -374,6 +398,10 @@ jobs:
           Write-Host "Playbook ID=$playbookId"
 
 
+      # ==========================================================
+      # 5. EXECUTE PLAYBOOK
+      # ==========================================================
+
       - name: Execute TestGuide playbook
         shell: pwsh
         env:
@@ -411,15 +439,12 @@ jobs:
             }
           }
 
-          $requestJson = $request |
-            ConvertTo-Json -Depth 20
-
           $response = Invoke-RestMethod `
             -Method POST `
             -Uri $url `
             -Headers $headers `
             -ContentType 'application/json' `
-            -Body $requestJson `
+            -Body ($request | ConvertTo-Json -Depth 20) `
             -ErrorAction Stop
 
           $taskIds = @($response.taskIds)
@@ -442,6 +467,10 @@ jobs:
 
           Write-Host "Execution Task ID=$taskId"
 
+
+      # ==========================================================
+      # 6. POLL EXECUTION
+      # ==========================================================
 
       - name: Poll TestGuide execution
         shell: pwsh
@@ -488,8 +517,6 @@ jobs:
           $completed = $false
           $attempt = 0
 
-          Write-Host "Task URL=$url"
-
           while ((Get-Date) -lt $deadline) {
             $attempt++
 
@@ -517,7 +544,7 @@ jobs:
                 $attempt -le 12
               ) {
                 Write-Host (
-                  "Task $taskId is not available yet. " +
+                  "Task $taskId not available yet. " +
                   "Retrying in 5 seconds."
                 )
 
@@ -529,12 +556,11 @@ jobs:
             }
 
             $state = "$($task.state)".Trim().ToUpperInvariant()
-            $verdict = "$($task.aggregatedVerdict)".Trim()
 
             Write-Host (
               "Attempt=$attempt " +
               "State=$state " +
-              "Verdict=$verdict"
+              "Verdict=$($task.aggregatedVerdict)"
             )
 
             if ($state -in $successStates) {
@@ -582,6 +608,10 @@ jobs:
               -Encoding utf8 `
               -Append
 
+
+      # ==========================================================
+      # 7. FIND CURRENT TESTGUIDE REPORT
+      # ==========================================================
 
       - name: Find current TestGuide report
         shell: pwsh
@@ -651,9 +681,7 @@ jobs:
                     "$($_.status)".Trim().ToUpperInvariant()
                   )
 
-                  $executionText = (
-                    "$($_.executionDate)".Trim()
-                  )
+                  $executionText = "$($_.executionDate)".Trim()
 
                   if (-not $executionText) {
                     return $false
@@ -708,17 +736,16 @@ jobs:
           Write-Host "Report ID=$reportId"
 
 
+      # ==========================================================
+      # 8. START ATX EXPORT
+      # ==========================================================
+
       - name: Start ATX export
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
         run: |
           $ErrorActionPreference = 'Stop'
-
-          $headers = @{
-            'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
-            'Accept' = 'application/json'
-          }
 
           $reportId = "$env:TESTGUIDE_REPORT_ID".Trim()
 
@@ -731,6 +758,11 @@ jobs:
             "$reportId" +
             "?useExportStorage=false"
           )
+
+          $headers = @{
+            'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
+            'Accept' = 'application/json'
+          }
 
           $response = Invoke-RestMethod `
             -Method POST `
@@ -753,17 +785,16 @@ jobs:
           Write-Host "ATX Export Task=$taskId"
 
 
+      # ==========================================================
+      # 9. POLL ATX EXPORT
+      # ==========================================================
+
       - name: Poll ATX export
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
         run: |
           $ErrorActionPreference = 'Stop'
-
-          $headers = @{
-            'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
-            'Accept' = 'application/json'
-          }
 
           $taskId = "$env:ATX_EXPORT_TASK_ID".Trim()
 
@@ -775,6 +806,11 @@ jobs:
             "$env:ONECX_URL/api/report/export/atx/" +
             "$taskId/status"
           )
+
+          $headers = @{
+            'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
+            'Accept' = 'application/json'
+          }
 
           $deadline = (Get-Date).AddMinutes(30)
 
@@ -857,6 +893,10 @@ jobs:
               -Append
 
 
+      # ==========================================================
+      # 10. DOWNLOAD REPORT
+      # ==========================================================
+
       - name: Download TestGuide report
         shell: pwsh
         env:
@@ -875,13 +915,13 @@ jobs:
           }
 
           $safeJira = (
-            $env:JIRA_KEY -replace
+            "$env:JIRA_KEY".Trim() -replace
             '[^a-zA-Z0-9._-]',
             '_'
           )
 
           $safeEcu = (
-            $env:TARGET_ECU -replace
+            "$env:TARGET_ECU".Trim() -replace
             '[^a-zA-Z0-9._-]',
             '_'
           )
@@ -940,6 +980,10 @@ jobs:
           Write-Host "Size=$($fileInfo.Length)"
 
 
+      # ==========================================================
+      # 11. GITHUB ARTIFACT
+      # ==========================================================
+
       - name: Upload TestGuide report to GitHub Actions
         uses: actions/upload-artifact@v4
         with:
@@ -949,6 +993,10 @@ jobs:
           retention-days: 30
 
 
+      # ==========================================================
+      # 12. JFROG
+      # ==========================================================
+
       - name: Upload TestGuide report to JFrog
         shell: pwsh
         env:
@@ -956,8 +1004,17 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          if (-not "$env:JFROG_TOKEN".Trim()) {
+          $token = "$env:JFROG_TOKEN".Trim()
+
+          if (-not $token) {
             throw 'JFROG_TOKEN is missing.'
+          }
+
+          $token = $token.Replace("`r", '')
+          $token = $token.Replace("`n", '')
+
+          if (-not $token) {
+            throw 'JFROG_TOKEN is empty after normalization.'
           }
 
           if (-not (Test-Path -LiteralPath $env:TESTGUIDE_ATX_FILE)) {
@@ -975,13 +1032,13 @@ jobs:
           }
 
           $safeJira = (
-            $env:JIRA_KEY -replace
+            "$env:JIRA_KEY".Trim() -replace
             '[^a-zA-Z0-9._-]',
             '_'
           )
 
           $safeEcu = (
-            $env:TARGET_ECU -replace
+            "$env:TARGET_ECU".Trim() -replace
             '[^a-zA-Z0-9._-]',
             '_'
           )
@@ -1001,24 +1058,37 @@ jobs:
           )
 
           $headers = @{
-            Authorization = "Bearer $env:JFROG_TOKEN"
+            Authorization = "Bearer $token"
           }
 
           Write-Host '========================================'
           Write-Host 'UPLOAD TO JFROG'
           Write-Host '========================================'
           Write-Host "File : $($fileInfo.FullName)"
+          Write-Host "Size : $($fileInfo.Length) bytes"
           Write-Host "Path : $artifactPath"
           Write-Host "URL  : $uploadUrl"
           Write-Host '========================================'
 
-          $response = Invoke-WebRequest `
-            -Method PUT `
-            -Uri $uploadUrl `
-            -Headers $headers `
-            -InFile $fileInfo.FullName `
-            -ContentType 'application/octet-stream' `
-            -ErrorAction Stop
+          try {
+            $response = Invoke-WebRequest `
+              -Method PUT `
+              -Uri $uploadUrl `
+              -Headers $headers `
+              -InFile $fileInfo.FullName `
+              -ContentType 'application/octet-stream' `
+              -ErrorAction Stop
+          }
+          catch {
+            Write-Host 'JFrog upload failed.'
+            Write-Host $_.Exception.Message
+
+            if ($null -ne $_.ErrorDetails) {
+              Write-Host $_.ErrorDetails.Message
+            }
+
+            throw
+          }
 
           $statusCode = [int]$response.StatusCode
 
@@ -1039,10 +1109,17 @@ jobs:
               -Encoding utf8 `
               -Append
 
-          Write-Host "JFrog upload successful."
-          Write-Host "HTTP=$statusCode"
-          Write-Host "URL=$uploadUrl"
+          Write-Host '========================================'
+          Write-Host 'JFROG UPLOAD COMPLETE'
+          Write-Host '========================================'
+          Write-Host "HTTP : $statusCode"
+          Write-Host "URL  : $uploadUrl"
+          Write-Host '========================================'
 
+
+      # ==========================================================
+      # 13. SUMMARY
+      # ==========================================================
 
       - name: Publish execution summary
         if: always()
