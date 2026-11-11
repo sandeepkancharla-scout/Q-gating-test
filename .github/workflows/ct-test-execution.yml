@@ -42,6 +42,7 @@ jobs:
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+          JFROG_USER: ${{ secrets.JFROG_USER }}
           JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
         run: |
           $ErrorActionPreference = 'Stop'
@@ -55,6 +56,7 @@ jobs:
             PLAYBOOK_NAME = $env:PLAYBOOK_NAME
             ONECX_PROJECT_ID = $env:ONECX_PROJECT_ID
             ONECX_AUTH_KEY = $env:ONECX_AUTH_KEY
+            JFROG_USER = $env:JFROG_USER
             JFROG_TOKEN = $env:JFROG_TOKEN
           }
 
@@ -522,7 +524,7 @@ jobs:
                 $attempt -le 12
               ) {
                 Write-Host (
-                  "Task $taskId not available yet. " +
+                  "Task $taskId is not available yet. " +
                   "Retrying in 5 seconds."
                 )
 
@@ -742,6 +744,8 @@ jobs:
               -Encoding utf8 `
               -Append
 
+          Write-Host "ATX Export Task=$taskId"
+
 
       - name: Poll ATX export
         shell: pwsh
@@ -932,13 +936,10 @@ jobs:
           retention-days: 30
 
 
-      # ==========================================================
-      # LOCAL RUNNER -> eeint-report-files
-      # ==========================================================
-
       - name: Upload local TestGuide report to JFrog
         shell: pwsh
         env:
+          JFROG_USER: ${{ secrets.JFROG_USER }}
           JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
         run: |
           $ErrorActionPreference = 'Stop'
@@ -960,11 +961,17 @@ jobs:
             throw 'Local report is empty.'
           }
 
-          $token = "$env:JFROG_TOKEN"
-          $token = $token -replace '\s+', ''
+          $jfrogUser = "$env:JFROG_USER".Trim()
 
-          if (-not $token) {
-            throw 'JFROG_TOKEN is missing or empty.'
+          $jfrogToken = "$env:JFROG_TOKEN"
+          $jfrogToken = $jfrogToken -replace '\s+', ''
+
+          if (-not $jfrogUser) {
+            throw 'JFROG_USER is missing.'
+          }
+
+          if (-not $jfrogToken) {
+            throw 'JFROG_TOKEN is missing.'
           }
 
           $safeJira = "$env:JIRA_KEY".Trim()
@@ -991,26 +998,35 @@ jobs:
           Write-Host '========================================'
           Write-Host 'LOCAL RUNNER TO JFROG'
           Write-Host '========================================'
-          Write-Host "Repository  : $env:JFROG_REPOSITORY"
-          Write-Host "Runner File : $($fileInfo.FullName)"
-          Write-Host "Size        : $($fileInfo.Length) bytes"
-          Write-Host "JFrog Path  : $artifactPath"
-          Write-Host "JFrog URL   : $uploadUrl"
+          Write-Host "User       : $jfrogUser"
+          Write-Host "Repository : $env:JFROG_REPOSITORY"
+          Write-Host "Runner File: $($fileInfo.FullName)"
+          Write-Host "Size       : $($fileInfo.Length) bytes"
+          Write-Host "JFrog Path : $artifactPath"
+          Write-Host "JFrog URL  : $uploadUrl"
           Write-Host '========================================'
 
-          $authHeader = "Authorization: Bearer $token"
+          $curlArguments = @(
+            '--fail-with-body'
+            '--silent'
+            '--show-error'
+            '--request'
+            'PUT'
+            '--user'
+            "${jfrogUser}:${jfrogToken}"
+            '--header'
+            'Content-Type: application/octet-stream'
+            '--upload-file'
+            $fileInfo.FullName
+            $uploadUrl
+          )
 
-          & curl.exe `
-            --fail-with-body `
-            --silent `
-            --show-error `
-            --request PUT `
-            --header $authHeader `
-            --header "Content-Type: application/octet-stream" `
-            --upload-file "$($fileInfo.FullName)" `
-            "$uploadUrl"
-
+          $output = & curl.exe @curlArguments
           $exitCode = $LASTEXITCODE
+
+          if ($output) {
+            Write-Host $output
+          }
 
           if ($exitCode -ne 0) {
             throw (
@@ -1032,8 +1048,7 @@ jobs:
           Write-Host '========================================'
           Write-Host 'JFROG UPLOAD COMPLETE'
           Write-Host '========================================'
-          Write-Host "Repository : $env:JFROG_REPOSITORY"
-          Write-Host "URL        : $uploadUrl"
+          Write-Host "URL: $uploadUrl"
           Write-Host '========================================'
 
 
