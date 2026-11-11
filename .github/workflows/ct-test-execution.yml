@@ -1052,6 +1052,241 @@ jobs:
           Write-Host '========================================'
 
 
+      # ONLY NEW FUNCTIONAL STEP
+      - name: Add JFrog report link to Jira comment
+        shell: pwsh
+        env:
+          JIRA_USER: ${{ secrets.JIRA_USER }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          if ($env:JFROG_UPLOAD_STATUS -ne 'SUCCESS') {
+            throw 'JFrog upload was not successful.'
+          }
+
+          $jiraUser = "$env:JIRA_USER".Trim()
+
+          $jiraToken = "$env:JIRA_API_TOKEN"
+          $jiraToken = $jiraToken -replace '\s+', ''
+
+          if (-not $jiraUser) {
+            throw 'JIRA_USER is missing.'
+          }
+
+          if (-not $jiraToken) {
+            throw 'JIRA_API_TOKEN is missing.'
+          }
+
+          $jiraKey = "$env:JIRA_KEY".Trim()
+          $reportUrl = "$env:JFROG_REPORT_URL".Trim()
+
+          if (-not $jiraKey) {
+            throw 'JIRA_KEY is missing.'
+          }
+
+          if (-not $reportUrl) {
+            throw 'JFROG_REPORT_URL is missing.'
+          }
+
+          $commentUrl = (
+            "$env:JIRA_URL/rest/api/3/issue/" +
+            "$jiraKey/comment"
+          )
+
+          $content = @(
+            @{
+              type = 'heading'
+              attrs = @{
+                level = 3
+              }
+              content = @(
+                @{
+                  type = 'text'
+                  text = 'HIL Quality Gate Result'
+                }
+              )
+            },
+            @{
+              type = 'paragraph'
+              content = @(
+                @{
+                  type = 'text'
+                  text = "ECU: $env:TARGET_ECU"
+                }
+              )
+            },
+            @{
+              type = 'paragraph'
+              content = @(
+                @{
+                  type = 'text'
+                  text = "Bench: $env:BENCH_ID"
+                }
+              )
+            },
+            @{
+              type = 'paragraph'
+              content = @(
+                @{
+                  type = 'text'
+                  text = "Resource: $env:TESTGUIDE_RESOURCE"
+                }
+              )
+            },
+            @{
+              type = 'paragraph'
+              content = @(
+                @{
+                  type = 'text'
+                  text = "Playbook ID: $env:TESTGUIDE_PLAYBOOK_ID"
+                }
+              )
+            },
+            @{
+              type = 'paragraph'
+              content = @(
+                @{
+                  type = 'text'
+                  text = "Execution Task: $env:TESTGUIDE_TASK_ID"
+                }
+              )
+            },
+            @{
+              type = 'paragraph'
+              content = @(
+                @{
+                  type = 'text'
+                  text = "TestGuide Report ID: $env:TESTGUIDE_REPORT_ID"
+                }
+              )
+            },
+            @{
+              type = 'paragraph'
+              content = @(
+                @{
+                  type = 'text'
+                  text = "Test Plan: $env:TESTGUIDE_REPORT_PLAN"
+                }
+              )
+            },
+            @{
+              type = 'paragraph'
+              content = @(
+                @{
+                  type = 'text'
+                  text = "Execution State: $env:FINAL_TASK_STATE"
+                }
+              )
+            },
+            @{
+              type = 'paragraph'
+              content = @(
+                @{
+                  type = 'text'
+                  text = "Verdict: $env:FINAL_TASK_VERDICT"
+                }
+              )
+            },
+            @{
+              type = 'paragraph'
+              content = @(
+                @{
+                  type = 'text'
+                  text = 'Test Report: '
+                },
+                @{
+                  type = 'text'
+                  text = 'Open JFrog ATX Report'
+                  marks = @(
+                    @{
+                      type = 'link'
+                      attrs = @{
+                        href = $reportUrl
+                      }
+                    }
+                  )
+                }
+              )
+            }
+          )
+
+          $jiraPayload = @{
+            body = @{
+              type = 'doc'
+              version = 1
+              content = $content
+            }
+          }
+
+          $jsonFile = Join-Path `
+            $env:RUNNER_TEMP `
+            'jira-comment.json'
+
+          $jiraPayload |
+            ConvertTo-Json -Depth 30 |
+            Set-Content `
+              -LiteralPath $jsonFile `
+              -Encoding utf8
+
+          Write-Host '========================================'
+          Write-Host 'ADD JFROG LINK TO JIRA'
+          Write-Host '========================================'
+          Write-Host "Issue     : $jiraKey"
+          Write-Host "ECU       : $env:TARGET_ECU"
+          Write-Host "Bench     : $env:BENCH_ID"
+          Write-Host "Resource  : $env:TESTGUIDE_RESOURCE"
+          Write-Host "Task ID   : $env:TESTGUIDE_TASK_ID"
+          Write-Host "Report ID : $env:TESTGUIDE_REPORT_ID"
+          Write-Host "State     : $env:FINAL_TASK_STATE"
+          Write-Host "Verdict   : $env:FINAL_TASK_VERDICT"
+          Write-Host "JFrog URL : $reportUrl"
+          Write-Host '========================================'
+
+          $curlArguments = @(
+            '--fail-with-body'
+            '--silent'
+            '--show-error'
+            '--request'
+            'POST'
+            '--user'
+            "${jiraUser}:${jiraToken}"
+            '--header'
+            'Accept: application/json'
+            '--header'
+            'Content-Type: application/json'
+            '--data-binary'
+            "@$jsonFile"
+            $commentUrl
+          )
+
+          $output = & curl.exe @curlArguments
+          $exitCode = $LASTEXITCODE
+
+          if ($output) {
+            Write-Host $output
+          }
+
+          if ($exitCode -ne 0) {
+            throw (
+              "Jira comment failed. " +
+              "curl exit code=$exitCode"
+            )
+          }
+
+          "JIRA_COMMENT_STATUS=SUCCESS" |
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
+
+          Write-Host '========================================'
+          Write-Host 'JIRA COMMENT ADDED'
+          Write-Host '========================================'
+          Write-Host "Issue: $jiraKey"
+          Write-Host '========================================'
+
+
       - name: Publish execution summary
         if: always()
         shell: pwsh
@@ -1077,6 +1312,7 @@ jobs:
             "| JFrog Path | $env:JFROG_REPORT_PATH |"
             "| JFrog URL | $env:JFROG_REPORT_URL |"
             "| JFrog Status | $env:JFROG_UPLOAD_STATUS |"
+            "| Jira Comment | $env:JIRA_COMMENT_STATUS |"
             "| Workflow Status | ${{ job.status }} |"
           ) |
             Out-File `
