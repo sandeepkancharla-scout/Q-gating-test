@@ -192,7 +192,11 @@ jobs:
           $configuration = "$env:CONFIGURATION_FOLDER".Trim()
 
           $ecu = "$env:TARGET_ECU".Trim()
-          $ecu = $ecu.TrimStart('_').Trim()
+          $ecu = $ecu -replace '^[^A-Za-z0-9]+', ''
+
+          if (-not $ecu) {
+            throw 'TARGET_ECU is empty after normalization.'
+          }
 
           $package = "$env:BENCH_NAME".Trim()
 
@@ -399,7 +403,7 @@ jobs:
 
 
       # ==========================================================
-      # 5. EXECUTE PLAYBOOK
+      # 5. EXECUTE
       # ==========================================================
 
       - name: Execute TestGuide playbook
@@ -544,7 +548,7 @@ jobs:
                 $attempt -le 12
               ) {
                 Write-Host (
-                  "Task $taskId not available yet. " +
+                  "Task $taskId is not available yet. " +
                   "Retrying in 5 seconds."
                 )
 
@@ -610,7 +614,7 @@ jobs:
 
 
       # ==========================================================
-      # 7. FIND CURRENT TESTGUIDE REPORT
+      # 7. FIND REPORT
       # ==========================================================
 
       - name: Find current TestGuide report
@@ -636,6 +640,7 @@ jobs:
           )
 
           $deadline = (Get-Date).AddMinutes(15)
+
           $selectedReport = $null
           $attempt = 0
 
@@ -894,10 +899,10 @@ jobs:
 
 
       # ==========================================================
-      # 10. DOWNLOAD REPORT
+      # 10. DOWNLOAD TO SELF-HOSTED RUNNER
       # ==========================================================
 
-      - name: Download TestGuide report
+      - name: Download TestGuide report to local runner
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
@@ -914,17 +919,12 @@ jobs:
             throw 'ATX_EXPORT_TASK_ID is missing.'
           }
 
-          $safeJira = (
-            "$env:JIRA_KEY".Trim() -replace
-            '[^a-zA-Z0-9._-]',
-            '_'
-          )
+          $safeJira = "$env:JIRA_KEY".Trim()
+          $safeJira = $safeJira -replace '[^A-Za-z0-9._-]', '_'
 
-          $safeEcu = (
-            "$env:TARGET_ECU".Trim() -replace
-            '[^a-zA-Z0-9._-]',
-            '_'
-          )
+          $safeEcu = "$env:TARGET_ECU".Trim()
+          $safeEcu = $safeEcu -replace '^[^A-Za-z0-9]+', ''
+          $safeEcu = $safeEcu -replace '[^A-Za-z0-9._-]', '_'
 
           $reportFile = Join-Path `
             $env:RUNNER_TEMP `
@@ -940,12 +940,10 @@ jobs:
           }
 
           Write-Host '========================================'
-          Write-Host 'DOWNLOAD TESTGUIDE REPORT'
+          Write-Host 'DOWNLOAD TO LOCAL RUNNER'
           Write-Host '========================================'
-          Write-Host "Report ID : $env:TESTGUIDE_REPORT_ID"
-          Write-Host "Task ID   : $taskId"
-          Write-Host "URL       : $downloadUrl"
-          Write-Host "File      : $reportFile"
+          Write-Host "URL  : $downloadUrl"
+          Write-Host "File : $reportFile"
           Write-Host '========================================'
 
           Invoke-WebRequest `
@@ -976,12 +974,12 @@ jobs:
               -Encoding utf8 `
               -Append
 
-          Write-Host "Report=$reportFile"
-          Write-Host "Size=$($fileInfo.Length)"
+          Write-Host "Local report=$reportFile"
+          Write-Host "Size=$($fileInfo.Length) bytes"
 
 
       # ==========================================================
-      # 11. GITHUB ARTIFACT
+      # 11. OPTIONAL GITHUB COPY
       # ==========================================================
 
       - name: Upload TestGuide report to GitHub Actions
@@ -994,54 +992,48 @@ jobs:
 
 
       # ==========================================================
-      # 12. JFROG
+      # 12. LOCAL RUNNER TO JFROG
       # ==========================================================
 
-      - name: Upload TestGuide report to JFrog
+      - name: Upload local TestGuide report to JFrog
         shell: pwsh
         env:
           JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $token = "$env:JFROG_TOKEN".Trim()
+          $reportFile = "$env:TESTGUIDE_ATX_FILE".Trim()
 
-          if (-not $token) {
-            throw 'JFROG_TOKEN is missing.'
+          if (-not $reportFile) {
+            throw 'TESTGUIDE_ATX_FILE is missing.'
           }
 
-          $token = $token.Replace("`r", '')
-          $token = $token.Replace("`n", '')
-
-          if (-not $token) {
-            throw 'JFROG_TOKEN is empty after normalization.'
-          }
-
-          if (-not (Test-Path -LiteralPath $env:TESTGUIDE_ATX_FILE)) {
-            throw (
-              "TestGuide report does not exist: " +
-              "$env:TESTGUIDE_ATX_FILE"
-            )
+          if (-not (Test-Path -LiteralPath $reportFile)) {
+            throw "Local report not found: $reportFile"
           }
 
           $fileInfo = Get-Item `
-            -LiteralPath $env:TESTGUIDE_ATX_FILE
+            -LiteralPath $reportFile
 
           if ($fileInfo.Length -eq 0) {
-            throw 'TestGuide report is empty.'
+            throw 'Local report is empty.'
           }
 
-          $safeJira = (
-            "$env:JIRA_KEY".Trim() -replace
-            '[^a-zA-Z0-9._-]',
-            '_'
-          )
+          $token = "$env:JFROG_TOKEN"
 
-          $safeEcu = (
-            "$env:TARGET_ECU".Trim() -replace
-            '[^a-zA-Z0-9._-]',
-            '_'
-          )
+          # Remove all copied whitespace/newlines from the secret.
+          $token = $token -replace '\s+', ''
+
+          if (-not $token) {
+            throw 'JFROG_TOKEN is missing or empty.'
+          }
+
+          $safeJira = "$env:JIRA_KEY".Trim()
+          $safeJira = $safeJira -replace '[^A-Za-z0-9._-]', '_'
+
+          $safeEcu = "$env:TARGET_ECU".Trim()
+          $safeEcu = $safeEcu -replace '^[^A-Za-z0-9]+', ''
+          $safeEcu = $safeEcu -replace '[^A-Za-z0-9._-]', '_'
 
           $artifactPath = (
             "quality-gate-reports/" +
@@ -1057,52 +1049,40 @@ jobs:
             "$artifactPath"
           )
 
-          $headers = @{
-            Authorization = "Bearer $token"
-          }
-
           Write-Host '========================================'
-          Write-Host 'UPLOAD TO JFROG'
+          Write-Host 'LOCAL RUNNER TO JFROG'
           Write-Host '========================================'
-          Write-Host "File : $($fileInfo.FullName)"
-          Write-Host "Size : $($fileInfo.Length) bytes"
-          Write-Host "Path : $artifactPath"
-          Write-Host "URL  : $uploadUrl"
+          Write-Host "Runner File : $($fileInfo.FullName)"
+          Write-Host "Size        : $($fileInfo.Length) bytes"
+          Write-Host "JFrog Path  : $artifactPath"
+          Write-Host "JFrog URL   : $uploadUrl"
           Write-Host '========================================'
 
-          try {
-            $response = Invoke-WebRequest `
-              -Method PUT `
-              -Uri $uploadUrl `
-              -Headers $headers `
-              -InFile $fileInfo.FullName `
-              -ContentType 'application/octet-stream' `
-              -ErrorAction Stop
-          }
-          catch {
-            Write-Host 'JFrog upload failed.'
-            Write-Host $_.Exception.Message
+          $authHeader = "Authorization: Bearer $token"
 
-            if ($null -ne $_.ErrorDetails) {
-              Write-Host $_.ErrorDetails.Message
-            }
+          & curl.exe `
+            --fail-with-body `
+            --silent `
+            --show-error `
+            --request PUT `
+            --header $authHeader `
+            --header "Content-Type: application/octet-stream" `
+            --upload-file "$($fileInfo.FullName)" `
+            "$uploadUrl"
 
-            throw
-          }
+          $exitCode = $LASTEXITCODE
 
-          $statusCode = [int]$response.StatusCode
-
-          if (
-            $statusCode -lt 200 -or
-            $statusCode -ge 300
-          ) {
-            throw "JFrog upload failed. HTTP=$statusCode"
+          if ($exitCode -ne 0) {
+            throw (
+              "JFrog upload failed. " +
+              "curl exit code=$exitCode"
+            )
           }
 
           @(
             "JFROG_REPORT_PATH=$artifactPath"
             "JFROG_REPORT_URL=$uploadUrl"
-            "JFROG_UPLOAD_STATUS=$statusCode"
+            "JFROG_UPLOAD_STATUS=SUCCESS"
           ) |
             Out-File `
               -FilePath $env:GITHUB_ENV `
@@ -1112,8 +1092,7 @@ jobs:
           Write-Host '========================================'
           Write-Host 'JFROG UPLOAD COMPLETE'
           Write-Host '========================================'
-          Write-Host "HTTP : $statusCode"
-          Write-Host "URL  : $uploadUrl"
+          Write-Host "URL: $uploadUrl"
           Write-Host '========================================'
 
 
@@ -1133,17 +1112,13 @@ jobs:
             "| Jira | $env:JIRA_KEY |"
             "| Bench | $env:BENCH_ID |"
             "| Resource | $env:TESTGUIDE_RESOURCE |"
-            "| Configuration | $env:CONFIGURATION_FOLDER |"
             "| ECU | $env:TARGET_ECU |"
             "| Playbook ID | $env:TESTGUIDE_PLAYBOOK_ID |"
             "| Execution Task | $env:TESTGUIDE_TASK_ID |"
-            "| Execution State | $env:FINAL_TASK_STATE |"
+            "| State | $env:FINAL_TASK_STATE |"
             "| Verdict | $env:FINAL_TASK_VERDICT |"
-            "| TestGuide Report ID | $env:TESTGUIDE_REPORT_ID |"
-            "| TestGuide Plan | $env:TESTGUIDE_REPORT_PLAN |"
-            "| ATX Export Task | $env:ATX_EXPORT_TASK_ID |"
-            "| Export File | $env:TESTGUIDE_ATX_FILE |"
-            "| Export Size | $env:TESTGUIDE_ATX_SIZE bytes |"
+            "| Report ID | $env:TESTGUIDE_REPORT_ID |"
+            "| Local Report | $env:TESTGUIDE_ATX_FILE |"
             "| JFrog Path | $env:JFROG_REPORT_PATH |"
             "| JFrog URL | $env:JFROG_REPORT_URL |"
             "| JFrog Status | $env:JFROG_UPLOAD_STATUS |"
