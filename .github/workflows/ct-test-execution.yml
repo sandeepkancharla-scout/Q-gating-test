@@ -27,14 +27,21 @@ jobs:
       PLAYBOOK_NAME: ${{ github.event.client_payload.playbook_name }}
       RESOURCE_NAME: ${{ github.event.client_payload.resource_name }}
 
-      ONECX_URL: https://testguide-ssp.onecx.vwgroup.com
+      ONECX_URL: 'https://testguide-ssp.onecx.vwgroup.com'
       ONECX_PROJECT_ID: ${{ vars.ONECX_PROJECT_ID }}
 
-      JIRA_URL: https://scoutmotors.atlassian.net
+      JIRA_URL: 'https://scoutmotors.atlassian.net'
 
     steps:
+
+      # ==========================================================
+      # 1. VALIDATE REQUEST
+      # ==========================================================
+
       - name: Validate request
         shell: pwsh
+        env:
+          ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
         run: |
           $ErrorActionPreference = 'Stop'
 
@@ -46,10 +53,15 @@ jobs:
             TEST_CASES = $env:TEST_CASES
             PLAYBOOK_NAME = $env:PLAYBOOK_NAME
             ONECX_PROJECT_ID = $env:ONECX_PROJECT_ID
+            ONECX_AUTH_KEY = $env:ONECX_AUTH_KEY
           }
 
           foreach ($item in $requiredValues.GetEnumerator()) {
-            if ([string]::IsNullOrWhiteSpace([string]$item.Value)) {
+            if (
+              [string]::IsNullOrWhiteSpace(
+                [string]$item.Value
+              )
+            ) {
               throw "Missing required value: $($item.Key)"
             }
           }
@@ -65,16 +77,9 @@ jobs:
             throw 'ONECX_PROJECT_ID must be an integer.'
           }
 
-          if (
-            [string]::IsNullOrWhiteSpace(
-              '${{ secrets.ONECX_AUTH_KEY }}'
-            )
-          ) {
-            throw 'ONECX_AUTH_KEY secret is missing.'
-          }
-
+          Write-Host ''
           Write-Host '========================================'
-          Write-Host 'JIRA REQUEST'
+          Write-Host 'JIRA EXECUTION REQUEST'
           Write-Host '========================================'
           Write-Host "Jira       : $env:JIRA_KEY"
           Write-Host "Bench ID   : $env:BENCH_ID"
@@ -82,7 +87,13 @@ jobs:
           Write-Host "ECU        : $env:TARGET_ECU"
           Write-Host "Test Cases : $env:TEST_CASES"
           Write-Host "Playbook   : $env:PLAYBOOK_NAME"
+          Write-Host "Project ID : $env:ONECX_PROJECT_ID"
           Write-Host '========================================'
+
+
+      # ==========================================================
+      # 2. RESOLVE RESOURCE AND PATHS
+      # ==========================================================
 
       - name: Resolve resource and paths
         shell: pwsh
@@ -90,11 +101,13 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           $bench = $env:BENCH_ID.Trim().ToUpperInvariant()
+
           $resourceName = ''
           $workspaceRoot = ''
           $configurationFolder = ''
 
           switch ($bench) {
+
             { $_ -in @('SYSHIL1', 'SYSHIL1-LABTEST1') } {
               $resourceName = 'syshil1-labtest1'
               $workspaceRoot = 'D:\HIL\Testing\eeint-Test-Automation'
@@ -178,7 +191,11 @@ jobs:
               $resourceName = [string]$env:RESOURCE_NAME
               $resourceName = $resourceName.Trim()
 
-              if ([string]::IsNullOrWhiteSpace($resourceName)) {
+              if (
+                [string]::IsNullOrWhiteSpace(
+                  $resourceName
+                )
+              ) {
                 throw "No ONE.CX resource mapping exists for $bench."
               }
 
@@ -193,6 +210,7 @@ jobs:
           )
 
           $ecuTestStepName = "ecu.test $resourceName Start"
+
           $benchPackage = $env:BENCH_NAME.Trim()
           $targetEcu = $env:TARGET_ECU.Trim()
 
@@ -236,6 +254,7 @@ jobs:
           "PROJECT_RELATIVE_PATH=$projectRelativePath" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
+          Write-Host ''
           Write-Host '========================================'
           Write-Host 'RESOURCE CONFIGURATION'
           Write-Host '========================================'
@@ -249,6 +268,11 @@ jobs:
           Write-Host "Project       : $projectRelativePath"
           Write-Host '========================================'
 
+
+      # ==========================================================
+      # 3. PARSE TEST CASES
+      # ==========================================================
+
       - name: Parse Jira test cases
         shell: pwsh
         run: |
@@ -256,7 +280,9 @@ jobs:
 
           $ids = @(
             $env:TEST_CASES -split '[,;]' |
-            ForEach-Object { $_.Trim() } |
+            ForEach-Object {
+              $_.Trim()
+            } |
             Where-Object {
               -not [string]::IsNullOrWhiteSpace($_)
             }
@@ -270,6 +296,13 @@ jobs:
 
           "NORMALIZED_TEST_CASES=$normalized" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+          Write-Host "Test Cases: $normalized"
+
+
+      # ==========================================================
+      # 4. GENERATE PLAYBOOK
+      # ==========================================================
 
       - name: Generate TestGuide playbook
         shell: pwsh
@@ -288,6 +321,7 @@ jobs:
                 path = $env:TESTGUIDE_ROOT
                 sourceType = 'location'
               }
+
               dependencies = @()
             }
 
@@ -300,6 +334,7 @@ jobs:
                   stepName = $env:ECUTEST_STEP_NAME
                   type = 'ecuTestStart'
                 },
+
                 [ordered]@{
                   tbcPath = $env:TBC_RELATIVE_PATH
                   tcfPath = $env:TCF_RELATIVE_PATH
@@ -351,7 +386,11 @@ jobs:
               -LiteralPath $playbookFile `
               -Encoding utf8
 
-          if (-not (Test-Path -LiteralPath $playbookFile)) {
+          if (
+            -not (
+              Test-Path -LiteralPath $playbookFile
+            )
+          ) {
             throw 'Playbook file was not created.'
           }
 
@@ -360,6 +399,11 @@ jobs:
 
           Write-Host $playbookJson
 
+
+      # ==========================================================
+      # 5. UPLOAD PLAYBOOK
+      # ==========================================================
+
       - name: Upload TestGuide playbook
         shell: pwsh
         env:
@@ -367,7 +411,11 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          if ([string]::IsNullOrWhiteSpace($env:ONECX_AUTH_KEY)) {
+          if (
+            [string]::IsNullOrWhiteSpace(
+              $env:ONECX_AUTH_KEY
+            )
+          ) {
             throw 'ONECX_AUTH_KEY is missing.'
           }
 
@@ -400,7 +448,11 @@ jobs:
             $response.playbookId
           ).Trim()
 
-          if ([string]::IsNullOrWhiteSpace($playbookId)) {
+          if (
+            [string]::IsNullOrWhiteSpace(
+              $playbookId
+            )
+          ) {
             throw 'Upload did not return playbookId.'
           }
 
@@ -411,6 +463,11 @@ jobs:
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
           Write-Host "Playbook ID: $playbookId"
+
+
+      # ==========================================================
+      # 6. EXECUTE PLAYBOOK
+      # ==========================================================
 
       - name: Execute TestGuide playbook
         shell: pwsh
@@ -448,13 +505,24 @@ jobs:
               analysisExecutionMode = 'sequential'
               downstreamAnalysisPartitioning = 'analysis'
               expirationTimeInMinutes = 60
-              issueTrackerTickets = @($jiraIssueUrl)
+
+              issueTrackerTickets = @(
+                $jiraIssueUrl
+              )
+
               remainingRetriesOnError = 0
-       ethod POST `
+            }
+          }
+
+          $requestJson = $request |
+            ConvertTo-Json -Depth 20
+
+          $response = Invoke-RestMethod `
+            -Method POST `
             -Uri $url `
             -Headers $headers `
             -ContentType 'application/json' `
-            -Body ($request | ConvertTo-Json -Depth 20) `
+            -Body $requestJson `
             -ErrorAction Stop
 
           $taskIds = @($response.taskIds)
@@ -463,11 +531,15 @@ jobs:
             throw 'Execution did not return taskIds.'
           }
 
-          $taskId = :ToString(
+          $taskId = [convert]::ToString(
             $taskIds[0]
           ).Trim()
 
-          if (:IsNullOrWhiteSpace($taskId)) {
+          if (
+            [string]::IsNullOrWhiteSpace(
+              $taskId
+            )
+          ) {
             throw 'Execution returned an empty taskId.'
           }
 
@@ -475,6 +547,11 @@ jobs:
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
           Write-Host "Execution Task ID: $taskId"
+
+
+      # ==========================================================
+      # 7. POLL EXECUTION
+      # ==========================================================
 
       - name: Poll TestGuide execution
         shell: pwsh
@@ -512,6 +589,7 @@ jobs:
           )
 
           $task = $null
+          $finalState = ''
 
           while ((Get-Date) -lt $deadline) {
             $task = Invoke-RestMethod `
@@ -520,7 +598,7 @@ jobs:
               -Headers $headers `
               -ErrorAction Stop
 
-            $state = :ToString(
+            $state = [convert]::ToString(
               $task.state
             ).Trim().ToUpperInvariant()
 
@@ -530,6 +608,7 @@ jobs:
             )
 
             if ($state -in $successStates) {
+              $finalState = $state
               break
             }
 
@@ -541,26 +620,37 @@ jobs:
               )
             }
 
-            Start-Sleep -Seconds 10
+ ow 'No execution response was received.'
           }
-
-          if ($null -eq $task) {
-            throw 'No execution response was received.'
-          }
-
-          $finalState = :ToString(
-            $task.state
-          ).Trim().ToUpperInvariant()
 
           if ($finalState -notin $successStates) {
-            throw "Execution timed out. State=$finalState"
+            throw (
+              "Execution timed out. " +
+              "Last state=$($task.state)"
+            )
           }
 
-          if (:IsNullOrWhiteSpace([string]$task.startDate)) {
+          $taskStartDate = :ToString(
+            $task.startDate
+          ).Trim()
+
+          $taskEndDate = :ToString(
+            $task.endDate
+          ).Trim()
+
+          if (
+            :IsNullOrWhiteSpace(
+              $taskStartDate
+            )
+          ) {
             throw 'Completed task has no startDate.'
           }
 
-          if (:IsNullOrWhiteSpace([string]$task.endDate)) {
+          if (
+            :IsNullOrWhiteSpace(
+              $taskEndDate
+            )
+          ) {
             throw 'Completed task has no endDate.'
           }
 
@@ -573,11 +663,16 @@ jobs:
           "FINAL_TASK_VERDICT=$($task.aggregatedVerdict)" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
-          "TASK_START_DATE=$($task.startDate)" |
+          "TASK_START_DATE=$taskStartDate" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
-          "TASK_END_DATE=$($task.endDate)" |
+          "TASK_END_DATE=$taskEndDate" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+
+      # ==========================================================
+      # 8. FIND CURRENT TESTGUIDE REPORT
+      # ==========================================================
 
       - name: Find current TestGuide report
         shell: pwsh
@@ -641,7 +736,7 @@ jobs:
             )
 
             Write-Host (
-              "Report-history attempt $attempt | " +
+              "Report attempt $attempt | " +
               "Expected=$expectedPlan"
             )
 
@@ -668,7 +763,11 @@ jobs:
                   $_.executionDate
                 ).Trim()
 
-                if (:IsNullOrWhiteSpace($executionText)) {
+                if (
+                  :IsNullOrWhiteSpace(
+                    $executionText
+                  )
+                ) {
                   return $false
                 }
 
@@ -686,7 +785,9 @@ jobs:
               } |
               Sort-Object {
                 :Parse(
-                  :ToString($_.uploadDate),
+                  :ToString(
+                    $_.uploadDate
+                  ),
                   [globalization.CultureInfo]::InvariantCulture
                 )
               } -Descending
@@ -696,6 +797,8 @@ jobs:
               $selectedReport = $matches[0]
               break
             }
+
+            Write-Host 'Report not imported yet. Waiting 15 seconds.'
 
             Start-Sleep -Seconds 15
           }
@@ -708,8 +811,12 @@ jobs:
             $selectedReport.reportId
           ).Trim()
 
-          if (:IsNullOrWhiteSpace($reportId)) {
-            throw 'Selected TestGuide report has no reportId.'
+          if (
+            :IsNullOrWhiteSpace(
+              $reportId
+            )
+          ) {
+            throw 'Selected report has no reportId.'
           }
 
           "TESTGUIDE_REPORT_ID=$reportId" |
@@ -726,12 +833,25 @@ jobs:
 
           Write-Host "TestGuide Report ID: $reportId"
 
+
+      # ==========================================================
+      # 9. START ATX EXPORT
+      # ==========================================================
+
       - name: Start ATX export
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
         run: |
           $ErrorActionPreference = 'Stop'
+
+          if (
+            :IsNullOrWhiteSpace(
+              $env:TESTGUIDE_REPORT_ID
+            )
+          ) {
+            throw 'TESTGUIDE_REPORT_ID is missing.'
+          }
 
           $headers = @{
             'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
@@ -758,7 +878,11 @@ jobs:
             $response.taskId
           ).Trim()
 
-          if (:IsNullOrWhiteSpace($taskId)) {
+          if (
+            :IsNullOrWhiteSpace(
+              $taskId
+            )
+          ) {
             throw 'ATX export did not return taskId.'
           }
 
@@ -766,6 +890,11 @@ jobs:
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
           Write-Host "ATX Export Task: $taskId"
+
+
+      # ==========================================================
+      # 10. POLL ATX EXPORT
+      # ==========================================================
 
       - name: Poll ATX export
         shell: pwsh
@@ -790,6 +919,25 @@ jobs:
 
           $deadline = (Get-Date).AddMinutes(30)
           $ready = $false
+
+          $successStates = @(
+            'FINISHED',
+            'COMPLETED',
+            'COMPLETE',
+            'SUCCESS',
+            'SUCCEEDED',
+            'READY',
+            'DONE'
+          )
+
+          $failureStates = @(
+            'FAILED',
+            'FAILURE',
+            'ERROR',
+            'ABORTED',
+            'CANCELLED',
+            'CANCELED'
+          )
 
           while ((Get-Date) -lt $deadline) {
             $status = Invoke-RestMethod `
@@ -826,31 +974,12 @@ jobs:
               $state = $status.Trim().Trim('"').ToUpperInvariant()
             }
 
-            if (
-              $state -in @(
-                'FINISHED',
-                'COMPLETED',
-                'COMPLETE',
-                'SUCCESS',
-                'SUCCEEDED',
-                'READY',
-                'DONE'
-              )
-            ) {
+            if ($state -in $successStates) {
               $ready = $true
               break
             }
 
-            if (
-              $state -in @(
-                'FAILED',
-                'FAILURE',
-                'ERROR',
-                'ABORTED',
-                'CANCELLED',
-                'CANCELED'
-              )
-            ) {
+            if ($state -in $failureStates) {
               throw "ATX export failed: $state"
             }
 
@@ -863,6 +992,11 @@ jobs:
 
           "ATX_EXPORT_STATE=COMPLETED" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+
+      # ==========================================================
+      # 11. DOWNLOAD TESTGUIDE REPORT
+      # ==========================================================
 
       - name: Download TestGuide report
         shell: pwsh
@@ -911,7 +1045,11 @@ jobs:
             -OutFile $temporaryFile `
             -ErrorAction Stop
 
-          if (-not (Test-Path -LiteralPath $temporaryFile)) {
+          if (
+            -not (
+              Test-Path -LiteralPath $temporaryFile
+            )
+          ) {
             throw 'TestGuide report was not downloaded.'
           }
 
@@ -962,6 +1100,7 @@ jobs:
               $preview.TrimStart().StartsWith('<!DOCTYPE html')
             ) {
               Write-Host $preview
+
               throw 'TestGuide download returned JSON or HTML.'
             }
 
@@ -990,7 +1129,13 @@ jobs:
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
           Write-Host "Report: $finalFile"
+          Write-Host "Type: $exportType"
           Write-Host "Size: $($finalInfo.Length) bytes"
+
+
+      # ==========================================================
+      # 12. UPLOAD TO GITHUB ACTIONS
+      # ==========================================================
 
       - name: Upload TestGuide report to GitHub Actions
         uses: actions/upload-artifact@v4
@@ -1000,6 +1145,11 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+
+      # ==========================================================
+      # 13. ATTACH REPORT DIRECTLY TO JIRA
+      # ==========================================================
+
       - name: Attach TestGuide report to Jira
         shell: pwsh
         env:
@@ -1008,11 +1158,19 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          if (:IsNullOrWhiteSpace($env:JIRA_EMAIL)) {
+          if (
+            :IsNullOrWhiteSpace(
+              $env:JIRA_EMAIL
+            )
+          ) {
             throw 'JIRA_EMAIL secret is missing.'
           }
 
-          if (:IsNullOrWhiteSpace($env:JIRA_API_TOKEN)) {
+          if (
+            :IsNullOrWhiteSpace(
+              $env:JIRA_API_TOKEN
+            )
+          ) {
             throw 'JIRA_API_TOKEN secret is missing.'
           }
 
@@ -1030,17 +1188,23 @@ jobs:
           $fileInfo = Get-Item `
             -LiteralPath $env:TESTGUIDE_ATX_FILE
 
+          if ($fileInfo.Length -eq 0) {
+            throw 'TestGuide report file is empty.'
+          }
+
           $jiraAttachmentUrl = (
             "$env:JIRA_URL/rest/api/3/issue/" +
             "$env:JIRA_KEY/attachments"
           )
 
+          Write-Host ''
           Write-Host '========================================'
           Write-Host 'ATTACH REPORT TO JIRA'
           Write-Host '========================================'
           Write-Host "Issue : $env:JIRA_KEY"
           Write-Host "File  : $($fileInfo.FullName)"
           Write-Host "Size  : $($fileInfo.Length)"
+          Write-Host "URL   : $jiraAttachmentUrl"
           Write-Host '========================================'
 
           $curlArguments = @(
@@ -1073,7 +1237,12 @@ jobs:
           "JIRA_REPORT_ATTACHED=true" |
             Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
-          Write-Host 'Report attached successfully.'
+          Write-Host 'Report attached to Jira successfully.'
+
+
+      # ==========================================================
+      # 14. SUMMARY
+      # ==========================================================
 
       - name: Publish execution summary
         if: always()
@@ -1091,6 +1260,7 @@ jobs:
             "| ECU | $env:TARGET_ECU |",
             "| Playbook ID | $env:TESTGUIDE_PLAYBOOK_ID |",
             "| Execution Task | $env:TESTGUIDE_TASK_ID |",
+            "| Execution State | $env:FINAL_TASK_STATE |",
             "| Verdict | $env:FINAL_TASK_VERDICT |",
             "| TestGuide Report ID | $env:TESTGUIDE_REPORT_ID |",
             "| TestGuide Plan | $env:TESTGUIDE_REPORT_PLAN |",
