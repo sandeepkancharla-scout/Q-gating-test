@@ -530,13 +530,13 @@ jobs:
               [ordered]@{
                 name = 'PROJECT_GENERATOR_TARGETECU'
                 label = 'PROJECT_GENERATOR_TARGETECU'
-                value = $projectGeneratorTargetEcu
+                value = "'$projectGeneratorTargetEcu'"
               },
 
               [ordered]@{
                 name = 'PROJECT_GENERATOR_CT'
                 label = 'PROJECT_GENERATOR_CT'
-                value = $projectGeneratorCt
+                value = 'True'
               }
             )
 
