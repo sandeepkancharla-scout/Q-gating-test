@@ -312,7 +312,7 @@ jobs:
                   relativePath = $env:PROJECT_RELATIVE_PATH
                   stepName = $env:ECUTEST_STEP_NAME
                   type = 'project'
-                  constants = @(
+                  parameters = @(
                     [ordered]@{
                       name = 'PROJECT_GENERATOR_TARGETECU'
                       value = "'$projectGeneratorTargetEcu'"
