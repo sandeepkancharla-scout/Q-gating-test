@@ -11,9 +11,7 @@ jobs:
       - self-hosted
       - Windows
       - X64
-
     timeout-minutes: 180
-
     concurrency:
       group: testguide-${{ github.event.client_payload.bench_id }}
       cancel-in-progress: false
@@ -28,15 +26,11 @@ jobs:
       TEST_CASES: ${{ github.event.client_payload.test_cases }}
       PLAYBOOK_NAME: ${{ github.event.client_payload.playbook_name }}
       RESOURCE_NAME: ${{ github.event.client_payload.resource_name }}
-
       CONFIGURATION_FOLDER: SUBSYS1
       PROJECT_RELATIVE_PATH: 'Packages\system-hil\L2_Quality_Gate\Network Testing\CAN_ID_Consistency_Check.prj'
-
       ONECX_URL: https://testguide-ssp.onecx.vwgroup.com
       ONECX_PROJECT_ID: ${{ vars.ONECX_PROJECT_ID }}
-
       JIRA_URL: https://scoutmotors.atlassian.net
-
       JFROG_URL: https://artifactory.sctmtrs.xyz/artifactory
       JFROG_REPOSITORY: eeint-report-files
 
@@ -67,7 +61,6 @@ jobs:
 
           foreach ($item in $required.GetEnumerator()) {
             $value = "$($item.Value)".Trim()
-
             if (-not $value) {
               throw "Missing required value: $($item.Key)"
             }
@@ -109,7 +102,6 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           $bench = "$env:BENCH_ID".Trim().ToUpperInvariant()
-
           $resource = ''
           $root = ''
 
@@ -209,18 +201,12 @@ jobs:
           $projectGeneratorTargetEcu = (
             "$env:PROJECT_GENERATOR_TARGETECU".Trim()
           )
-
           $projectGeneratorTargetEcu = (
-            $projectGeneratorTargetEcu -replace
-              '^[^A-Za-z0-9]+',
-              ''
+            $projectGeneratorTargetEcu -replace '^[^A-Za-z0-9]+', ''
           )
 
           if (-not $projectGeneratorTargetEcu) {
-            throw (
-              'PROJECT_GENERATOR_TARGETECU is empty ' +
-              'after normalization.'
-            )
+            throw 'PROJECT_GENERATOR_TARGETECU is empty after normalization.'
           }
 
           $xilIdentifier = (
@@ -299,7 +285,6 @@ jobs:
                 path = $env:TESTGUIDE_ROOT
                 sourceType = 'location'
               }
-
               dependencies = @()
             }
 
@@ -312,7 +297,6 @@ jobs:
                   stepName = $env:ECUTEST_STEP_NAME
                   type = 'ecuTestStart'
                 },
-
                 [ordered]@{
                   tbcPath = $env:TBC_RELATIVE_PATH
                   tcfPath = $env:TCF_RELATIVE_PATH
@@ -328,13 +312,16 @@ jobs:
                   relativePath = $env:PROJECT_RELATIVE_PATH
                   stepName = $env:ECUTEST_STEP_NAME
                   type = 'project'
-
-                  constants = [ordered]@{
-                    PROJECT_GENERATOR_TARGETECU = (
-                      "'$projectGeneratorTargetEcu'"
-                    )
-                    PROJECT_GENERATOR_CT = $projectGeneratorCt
-                  }
+                  constants = @(
+                    [ordered]@{
+                      name = 'PROJECT_GENERATOR_TARGETECU'
+                      value = "'$projectGeneratorTargetEcu'"
+                    },
+                    [ordered]@{
+                      name = 'PROJECT_GENERATOR_CT'
+                      value = $projectGeneratorCt
+                    }
+                  )
                 }
               )
             }
@@ -361,7 +348,6 @@ jobs:
                 name = 'PROJECT_GENERATOR_TARGETECU'
                 defaultValue = $projectGeneratorTargetEcu
               },
-
               [ordered]@{
                 name = 'PROJECT_GENERATOR_CT'
                 defaultValue = $projectGeneratorCt
@@ -383,26 +369,24 @@ jobs:
             throw 'Playbook file was not created.'
           }
 
+          $generatedPlaybook = Get-Content `
+            -LiteralPath $playbookFile `
+            -Raw |
+            ConvertFrom-Json
+
+          if (
+            $generatedPlaybook.execution.testcases[0].constants `
+              -isnot [System.Array]
+          ) {
+            throw 'Generated project constants must be a JSON array.'
+          }
+
           Write-Host '========================================'
           Write-Host 'PLAYBOOK PROJECT CONFIGURATION'
           Write-Host '========================================'
           Write-Host "Project Path : $env:PROJECT_RELATIVE_PATH"
-          Write-Host (
-            "PROJECT_GENERATOR_TARGETECU parameter : " +
-            $projectGeneratorTargetEcu
-          )
-          Write-Host (
-            "PROJECT_GENERATOR_TARGETECU constant  : " +
-            "'$projectGeneratorTargetEcu'"
-          )
-          Write-Host (
-            "PROJECT_GENERATOR_CT parameter        : " +
-            $projectGeneratorCt
-          )
-          Write-Host (
-            "PROJECT_GENERATOR_CT constant         : " +
-            $projectGeneratorCt
-          )
+          Write-Host "PROJECT_GENERATOR_TARGETECU : '$projectGeneratorTargetEcu'"
+          Write-Host "PROJECT_GENERATOR_CT        : $projectGeneratorCt"
           Write-Host '========================================'
 
           Get-Content -LiteralPath $playbookFile
@@ -436,6 +420,8 @@ jobs:
           $body = Get-Content `
             -LiteralPath $env:TESTGUIDE_PLAYBOOK_FILE `
             -Raw
+
+          Write-Host 'Uploading playbook with project constants as an array.'
 
           $response = Invoke-RestMethod `
             -Method POST `
@@ -494,30 +480,24 @@ jobs:
               "$env:JIRA_KEY - " +
               "$projectGeneratorTargetEcu CAN ID Consistency Check"
             )
-
             priority = 42
-
             parameters = @(
               [ordered]@{
                 name = 'PROJECT_GENERATOR_TARGETECU'
                 value = $projectGeneratorTargetEcu
               },
-
               [ordered]@{
                 name = 'PROJECT_GENERATOR_CT'
                 value = $projectGeneratorCt
               }
             )
-
             additionalSettings = [ordered]@{
               analysisExecutionMode = 'sequential'
               downstreamAnalysisPartitioning = 'analysis'
               expirationTimeInMinutes = 60
-
               issueTrackerTickets = @(
                 "$env:JIRA_URL/browse/$env:JIRA_KEY"
               )
-
               remainingRetriesOnError = 0
             }
           }
@@ -529,14 +509,8 @@ jobs:
           Write-Host 'EXECUTION REQUEST'
           Write-Host '========================================'
           Write-Host "Project Path : $env:PROJECT_RELATIVE_PATH"
-          Write-Host (
-            "PROJECT_GENERATOR_TARGETECU : " +
-            $projectGeneratorTargetEcu
-          )
-          Write-Host (
-            "PROJECT_GENERATOR_CT        : " +
-            $projectGeneratorCt
-          )
+          Write-Host "PROJECT_GENERATOR_TARGETECU : $projectGeneratorTargetEcu"
+          Write-Host "PROJECT_GENERATOR_CT        : $projectGeneratorCt"
           Write-Host '========================================'
           Write-Host $requestJson
 
@@ -635,15 +609,11 @@ jobs:
                 }
               }
 
-              if (
-                $statusCode -eq 404 -and
-                $attempt -le 12
-              ) {
+              if ($statusCode -eq 404 -and $attempt -le 12) {
                 Write-Host (
                   "Task $taskId is not available yet. " +
                   "Retrying in 5 seconds."
                 )
-
                 Start-Sleep -Seconds 5
                 continue
               }
@@ -675,20 +645,14 @@ jobs:
             Start-Sleep -Seconds 10
           }
 
-          if (
-            -not $completed -or
-            $null -eq $task
-          ) {
+          if (-not $completed -or $null -eq $task) {
             throw 'Execution polling timed out.'
           }
 
           $startDate = "$($task.startDate)".Trim()
           $endDate = "$($task.endDate)".Trim()
 
-          if (
-            -not $startDate -or
-            -not $endDate
-          ) {
+          if (-not $startDate -or -not $endDate) {
             throw 'Completed task has no startDate or endDate.'
           }
 
@@ -718,12 +682,9 @@ jobs:
 
           $taskStart = Get-Date $env:TASK_START_DATE
           $taskEnd = Get-Date $env:TASK_END_DATE
-
           $windowStart = $taskStart.AddMinutes(-2)
           $windowEnd = $taskEnd.AddMinutes(20)
-
           $expectedPlan = 'CAN_ID_Consistency_Check'
-
           $deadline = (Get-Date).AddMinutes(15)
           $selectedReport = $null
 
@@ -731,7 +692,6 @@ jobs:
             $startDate = $windowStart.ToString(
               'yyyy-MM-ddTHH:mm:ss.fffZ'
             )
-
             $endDate = $windowEnd.ToString(
               'yyyy-MM-ddTHH:mm:ss.fffZ'
             )
@@ -757,11 +717,7 @@ jobs:
               $reports |
                 Where-Object {
                   $name = "$($_.testPlanName)".Trim()
-
-                  $status = (
-                    "$($_.status)".Trim().ToUpperInvariant()
-                  )
-
+                  $status = "$($_.status)".Trim().ToUpperInvariant()
                   $executionText = "$($_.executionDate)".Trim()
 
                   if (-not $executionText) {
@@ -787,10 +743,7 @@ jobs:
               break
             }
 
-            Write-Host (
-              "Waiting for TestGuide report: $expectedPlan"
-            )
-
+            Write-Host "Waiting for TestGuide report: $expectedPlan"
             Start-Sleep -Seconds 15
           }
 
@@ -925,19 +878,13 @@ jobs:
             $state = ''
 
             if ($null -ne $response.state) {
-              $state = (
-                "$($response.state)".Trim().ToUpperInvariant()
-              )
+              $state = "$($response.state)".Trim().ToUpperInvariant()
             }
             elseif ($null -ne $response.status) {
-              $state = (
-                "$($response.status)".Trim().ToUpperInvariant()
-              )
+              $state = "$($response.status)".Trim().ToUpperInvariant()
             }
             elseif ($response -is [string]) {
-              $state = (
-                $response.Trim().Trim('"').ToUpperInvariant()
-              )
+              $state = $response.Trim().Trim('"').ToUpperInvariant()
             }
 
             Write-Host "ATX export state=$state"
@@ -1001,13 +948,6 @@ jobs:
             'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
           }
 
-          Write-Host '========================================'
-          Write-Host 'DOWNLOAD TO LOCAL RUNNER'
-          Write-Host '========================================'
-          Write-Host "URL  : $downloadUrl"
-          Write-Host "File : $reportFile"
-          Write-Host '========================================'
-
           Invoke-WebRequest `
             -Method GET `
             -Uri $downloadUrl `
@@ -1019,8 +959,7 @@ jobs:
             throw 'TestGuide report was not downloaded.'
           }
 
-          $fileInfo = Get-Item `
-            -LiteralPath $reportFile
+          $fileInfo = Get-Item -LiteralPath $reportFile
 
           if ($fileInfo.Length -eq 0) {
             throw 'Downloaded TestGuide report is empty.'
@@ -1065,15 +1004,13 @@ jobs:
             throw "Local report not found: $reportFile"
           }
 
-          $fileInfo = Get-Item `
-            -LiteralPath $reportFile
+          $fileInfo = Get-Item -LiteralPath $reportFile
 
           if ($fileInfo.Length -eq 0) {
             throw 'Local report is empty.'
           }
 
           $jfrogUser = "$env:JFROG_USER".Trim()
-
           $jfrogToken = "$env:JFROG_TOKEN"
           $jfrogToken = $jfrogToken -replace '\s+', ''
 
@@ -1106,17 +1043,6 @@ jobs:
             "$artifactPath"
           )
 
-          Write-Host '========================================'
-          Write-Host 'LOCAL RUNNER TO JFROG'
-          Write-Host '========================================'
-          Write-Host "User       : $jfrogUser"
-          Write-Host "Repository : $env:JFROG_REPOSITORY"
-          Write-Host "Runner File: $($fileInfo.FullName)"
-          Write-Host "Size       : $($fileInfo.Length) bytes"
-          Write-Host "JFrog Path : $artifactPath"
-          Write-Host "JFrog URL  : $uploadUrl"
-          Write-Host '========================================'
-
           $curlArguments = @(
             '--fail-with-body'
             '--silent'
@@ -1140,10 +1066,7 @@ jobs:
           }
 
           if ($exitCode -ne 0) {
-            throw (
-              "JFrog upload failed. " +
-              "curl exit code=$exitCode"
-            )
+            throw "JFrog upload failed. curl exit code=$exitCode"
           }
 
           @(
@@ -1156,11 +1079,7 @@ jobs:
               -Encoding utf8 `
               -Append
 
-          Write-Host '========================================'
-          Write-Host 'JFROG UPLOAD COMPLETE'
-          Write-Host '========================================'
-          Write-Host "URL: $uploadUrl"
-          Write-Host '========================================'
+          Write-Host "JFrog URL=$uploadUrl"
 
       - name: Add JFrog report link to Jira comment
         shell: pwsh
@@ -1175,7 +1094,6 @@ jobs:
           }
 
           $jiraUser = "$env:JIRA_USER".Trim()
-
           $jiraToken = "$env:JIRA_API_TOKEN"
           $jiraToken = $jiraToken -replace '\s+', ''
 
@@ -1242,10 +1160,7 @@ jobs:
               content = @(
                 @{
                   type = 'text'
-                  text = (
-                    "Project Generator CT: " +
-                    "$env:PROJECT_GENERATOR_CT"
-                  )
+                  text = "Project Generator CT: $env:PROJECT_GENERATOR_CT"
                 }
               )
             },
@@ -1264,15 +1179,6 @@ jobs:
                 @{
                   type = 'text'
                   text = "Resource: $env:TESTGUIDE_RESOURCE"
-                }
-              )
-            },
-            @{
-              type = 'paragraph'
-              content = @(
-                @{
-                  type = 'text'
-                  text = "Project: $env:PROJECT_RELATIVE_PATH"
                 }
               )
             },
@@ -1300,15 +1206,6 @@ jobs:
                 @{
                   type = 'text'
                   text = "TestGuide Report ID: $env:TESTGUIDE_REPORT_ID"
-                }
-              )
-            },
-            @{
-              type = 'paragraph'
-              content = @(
-                @{
-                  type = 'text'
-                  text = "Test Plan: $env:TESTGUIDE_REPORT_PLAN"
                 }
               )
             },
@@ -1371,22 +1268,6 @@ jobs:
               -LiteralPath $jsonFile `
               -Encoding utf8
 
-          Write-Host '========================================'
-          Write-Host 'ADD JFROG LINK TO JIRA'
-          Write-Host '========================================'
-          Write-Host "Issue     : $jiraKey"
-          Write-Host "Target ECU: $env:TARGET_ECU"
-          Write-Host "PG ECU    : $env:PROJECT_GENERATOR_TARGETECU"
-          Write-Host "PG CT     : $env:PROJECT_GENERATOR_CT"
-          Write-Host "Bench     : $env:BENCH_ID"
-          Write-Host "Resource  : $env:TESTGUIDE_RESOURCE"
-          Write-Host "Task ID   : $env:TESTGUIDE_TASK_ID"
-          Write-Host "Report ID : $env:TESTGUIDE_REPORT_ID"
-          Write-Host "State     : $env:FINAL_TASK_STATE"
-          Write-Host "Verdict   : $env:FINAL_TASK_VERDICT"
-          Write-Host "JFrog URL : $reportUrl"
-          Write-Host '========================================'
-
           $curlArguments = @(
             '--fail-with-body'
             '--silent'
@@ -1412,10 +1293,7 @@ jobs:
           }
 
           if ($exitCode -ne 0) {
-            throw (
-              "Jira comment failed. " +
-              "curl exit code=$exitCode"
-            )
+            throw "Jira comment failed. curl exit code=$exitCode"
           }
 
           "JIRA_COMMENT_STATUS=SUCCESS" |
@@ -1423,12 +1301,6 @@ jobs:
               -FilePath $env:GITHUB_ENV `
               -Encoding utf8 `
               -Append
-
-          Write-Host '========================================'
-          Write-Host 'JIRA COMMENT ADDED'
-          Write-Host '========================================'
-          Write-Host "Issue: $jiraKey"
-          Write-Host '========================================'
 
       - name: Publish execution summary
         if: always()
