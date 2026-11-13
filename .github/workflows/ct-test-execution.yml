@@ -368,13 +368,13 @@ jobs:
               [ordered]@{
                 name = 'PROJECT_GENERATOR_TARGETECU'
                 label = 'PROJECT_GENERATOR_TARGETECU'
-                defaultValue = $projectGeneratorTargetEcu
+                defaultValue = "'$projectGeneratorTargetEcu'"
               },
 
               [ordered]@{
                 name = 'PROJECT_GENERATOR_CT'
                 label = 'PROJECT_GENERATOR_CT'
-                defaultValue = $projectGeneratorCt
+                defaultValue = 'True'
               }
             )
           }
