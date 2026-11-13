@@ -23,11 +23,14 @@ jobs:
       BENCH_ID: ${{ github.event.client_payload.bench_id }}
       BENCH_NAME: ${{ github.event.client_payload.bench_name }}
       TARGET_ECU: ${{ github.event.client_payload.target_ecu }}
+      PROJECT_GENERATOR_TARGETECU: ${{ github.event.client_payload.target_ecu }}
+      PROJECT_GENERATOR_CT: 'true'
       TEST_CASES: ${{ github.event.client_payload.test_cases }}
       PLAYBOOK_NAME: ${{ github.event.client_payload.playbook_name }}
       RESOURCE_NAME: ${{ github.event.client_payload.resource_name }}
 
       CONFIGURATION_FOLDER: SUBSYS1
+      PROJECT_RELATIVE_PATH: 'Packages\system-hil\L2_Quality_Gate\Network Testing\CAN_ID_Consistency_Check.prj'
 
       ONECX_URL: https://testguide-ssp.onecx.vwgroup.com
       ONECX_PROJECT_ID: ${{ vars.ONECX_PROJECT_ID }}
@@ -52,6 +55,8 @@ jobs:
             BENCH_ID = $env:BENCH_ID
             BENCH_NAME = $env:BENCH_NAME
             TARGET_ECU = $env:TARGET_ECU
+            PROJECT_GENERATOR_TARGETECU = $env:PROJECT_GENERATOR_TARGETECU
+            PROJECT_GENERATOR_CT = $env:PROJECT_GENERATOR_CT
             TEST_CASES = $env:TEST_CASES
             PLAYBOOK_NAME = $env:PLAYBOOK_NAME
             ONECX_PROJECT_ID = $env:ONECX_PROJECT_ID
@@ -75,17 +80,28 @@ jobs:
             throw 'ONECX_PROJECT_ID must be an integer.'
           }
 
+          try {
+            $projectGeneratorCt = [System.Convert]::ToBoolean(
+              $env:PROJECT_GENERATOR_CT
+            )
+          }
+          catch {
+            throw 'PROJECT_GENERATOR_CT must be true or false.'
+          }
+
           Write-Host '========================================'
           Write-Host 'REQUEST'
           Write-Host '========================================'
           Write-Host "Jira       : $env:JIRA_KEY"
           Write-Host "Bench      : $env:BENCH_ID"
           Write-Host "Bench Name : $env:BENCH_NAME"
-          Write-Host "ECU        : $env:TARGET_ECU"
+          Write-Host "Target ECU : $env:TARGET_ECU"
+          Write-Host "PG ECU     : $env:PROJECT_GENERATOR_TARGETECU"
+          Write-Host "PG CT      : $projectGeneratorCt"
           Write-Host "Playbook   : $env:PLAYBOOK_NAME"
           Write-Host "Project ID : $projectId"
+          Write-Host "Project    : $env:PROJECT_RELATIVE_PATH"
           Write-Host '========================================'
-
 
       - name: Resolve resource and paths
         shell: pwsh
@@ -190,7 +206,22 @@ jobs:
             throw 'TARGET_ECU is empty after normalization.'
           }
 
-          $package = "$env:BENCH_NAME".Trim()
+          $projectGeneratorTargetEcu = (
+            "$env:PROJECT_GENERATOR_TARGETECU".Trim()
+          )
+
+          $projectGeneratorTargetEcu = (
+            $projectGeneratorTargetEcu -replace
+              '^[^A-Za-z0-9]+',
+              ''
+          )
+
+          if (-not $projectGeneratorTargetEcu) {
+            throw (
+              'PROJECT_GENERATOR_TARGETECU is empty ' +
+              'after normalization.'
+            )
+          }
 
           $xilIdentifier = (
             "novi_hq/1stfloor/ee_lab_novi/" +
@@ -209,21 +240,15 @@ jobs:
             "${configuration}_TestConfig.tcf"
           )
 
-          $projectPath = (
-            "Packages\$package\L2_Quality_Gate\" +
-            "$ecu\" +
-            "${ecu}_L2QualityGate.prj"
-          )
-
           @(
             "TARGET_ECU=$ecu"
+            "PROJECT_GENERATOR_TARGETECU=$projectGeneratorTargetEcu"
             "TESTGUIDE_RESOURCE=$resource"
             "TESTGUIDE_ROOT=$root"
             "XIL_IDENTIFIER=$xilIdentifier"
             "ECUTEST_STEP_NAME=$ecuTestStepName"
             "TBC_RELATIVE_PATH=$tbcPath"
             "TCF_RELATIVE_PATH=$tcfPath"
-            "PROJECT_RELATIVE_PATH=$projectPath"
           ) |
             Out-File `
               -FilePath $env:GITHUB_ENV `
@@ -237,18 +262,30 @@ jobs:
           Write-Host "Resource   : $resource"
           Write-Host "Workspace  : $root"
           Write-Host "Config     : $configuration"
-          Write-Host "ECU        : $ecu"
+          Write-Host "Target ECU : $ecu"
+          Write-Host "PG ECU     : $projectGeneratorTargetEcu"
           Write-Host "Identifier : $xilIdentifier"
           Write-Host "TBC        : $tbcPath"
           Write-Host "TCF        : $tcfPath"
-          Write-Host "Project    : $projectPath"
+          Write-Host "Project    : $env:PROJECT_RELATIVE_PATH"
           Write-Host '========================================'
-
 
       - name: Generate TestGuide playbook
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+
+          $projectGeneratorCt = [System.Convert]::ToBoolean(
+            $env:PROJECT_GENERATOR_CT
+          )
+
+          $projectGeneratorTargetEcu = (
+            "$env:PROJECT_GENERATOR_TARGETECU".Trim()
+          )
+
+          if (-not $projectGeneratorTargetEcu) {
+            throw 'PROJECT_GENERATOR_TARGETECU is missing.'
+          }
 
           $playbook = [ordered]@{
             metadata = [ordered]@{
@@ -291,6 +328,13 @@ jobs:
                   relativePath = $env:PROJECT_RELATIVE_PATH
                   stepName = $env:ECUTEST_STEP_NAME
                   type = 'project'
+
+                  constants = [ordered]@{
+                    PROJECT_GENERATOR_TARGETECU = (
+                      "'$projectGeneratorTargetEcu'"
+                    )
+                    PROJECT_GENERATOR_CT = $projectGeneratorCt
+                  }
                 }
               )
             }
@@ -312,7 +356,17 @@ jobs:
               }
             )
 
-            parameters = @()
+            parameters = @(
+              [ordered]@{
+                name = 'PROJECT_GENERATOR_TARGETECU'
+                defaultValue = $projectGeneratorTargetEcu
+              },
+
+              [ordered]@{
+                name = 'PROJECT_GENERATOR_CT'
+                defaultValue = $projectGeneratorCt
+              }
+            )
           }
 
           $playbookFile = Join-Path `
@@ -329,12 +383,35 @@ jobs:
             throw 'Playbook file was not created.'
           }
 
+          Write-Host '========================================'
+          Write-Host 'PLAYBOOK PROJECT CONFIGURATION'
+          Write-Host '========================================'
+          Write-Host "Project Path : $env:PROJECT_RELATIVE_PATH"
+          Write-Host (
+            "PROJECT_GENERATOR_TARGETECU parameter : " +
+            $projectGeneratorTargetEcu
+          )
+          Write-Host (
+            "PROJECT_GENERATOR_TARGETECU constant  : " +
+            "'$projectGeneratorTargetEcu'"
+          )
+          Write-Host (
+            "PROJECT_GENERATOR_CT parameter        : " +
+            $projectGeneratorCt
+          )
+          Write-Host (
+            "PROJECT_GENERATOR_CT constant         : " +
+            $projectGeneratorCt
+          )
+          Write-Host '========================================'
+
+          Get-Content -LiteralPath $playbookFile
+
           "TESTGUIDE_PLAYBOOK_FILE=$playbookFile" |
             Out-File `
               -FilePath $env:GITHUB_ENV `
               -Encoding utf8 `
               -Append
-
 
       - name: Upload TestGuide playbook
         shell: pwsh
@@ -385,7 +462,6 @@ jobs:
 
           Write-Host "Playbook ID=$playbookId"
 
-
       - name: Execute TestGuide playbook
         shell: pwsh
         env:
@@ -405,10 +481,33 @@ jobs:
             'Accept' = 'application/json'
           }
 
+          $projectGeneratorCt = [System.Convert]::ToBoolean(
+            $env:PROJECT_GENERATOR_CT
+          )
+
+          $projectGeneratorTargetEcu = (
+            "$env:PROJECT_GENERATOR_TARGETECU".Trim()
+          )
+
           $request = [ordered]@{
-            name = "$env:JIRA_KEY - $env:TARGET_ECU L2 Quality Gate"
+            name = (
+              "$env:JIRA_KEY - " +
+              "$projectGeneratorTargetEcu CAN ID Consistency Check"
+            )
+
             priority = 42
-            parameters = @()
+
+            parameters = @(
+              [ordered]@{
+                name = 'PROJECT_GENERATOR_TARGETECU'
+                value = $projectGeneratorTargetEcu
+              },
+
+              [ordered]@{
+                name = 'PROJECT_GENERATOR_CT'
+                value = $projectGeneratorCt
+              }
+            )
 
             additionalSettings = [ordered]@{
               analysisExecutionMode = 'sequential'
@@ -423,12 +522,30 @@ jobs:
             }
           }
 
+          $requestJson = $request |
+            ConvertTo-Json -Depth 20
+
+          Write-Host '========================================'
+          Write-Host 'EXECUTION REQUEST'
+          Write-Host '========================================'
+          Write-Host "Project Path : $env:PROJECT_RELATIVE_PATH"
+          Write-Host (
+            "PROJECT_GENERATOR_TARGETECU : " +
+            $projectGeneratorTargetEcu
+          )
+          Write-Host (
+            "PROJECT_GENERATOR_CT        : " +
+            $projectGeneratorCt
+          )
+          Write-Host '========================================'
+          Write-Host $requestJson
+
           $response = Invoke-RestMethod `
             -Method POST `
             -Uri $url `
             -Headers $headers `
             -ContentType 'application/json' `
-            -Body ($request | ConvertTo-Json -Depth 20) `
+            -Body $requestJson `
             -ErrorAction Stop
 
           $taskIds = @($response.taskIds)
@@ -450,7 +567,6 @@ jobs:
               -Append
 
           Write-Host "Execution Task ID=$taskId"
-
 
       - name: Poll TestGuide execution
         shell: pwsh
@@ -588,7 +704,6 @@ jobs:
               -Encoding utf8 `
               -Append
 
-
       - name: Find current TestGuide report
         shell: pwsh
         env:
@@ -607,9 +722,7 @@ jobs:
           $windowStart = $taskStart.AddMinutes(-2)
           $windowEnd = $taskEnd.AddMinutes(20)
 
-          $expectedPlan = (
-            "$($env:TARGET_ECU.Trim())_L2QualityGate"
-          )
+          $expectedPlan = 'CAN_ID_Consistency_Check'
 
           $deadline = (Get-Date).AddMinutes(15)
           $selectedReport = $null
@@ -674,7 +787,10 @@ jobs:
               break
             }
 
-            Write-Host 'Waiting for TestGuide report.'
+            Write-Host (
+              "Waiting for TestGuide report: $expectedPlan"
+            )
+
             Start-Sleep -Seconds 15
           }
 
@@ -700,7 +816,6 @@ jobs:
               -Append
 
           Write-Host "Report ID=$reportId"
-
 
       - name: Start ATX export
         shell: pwsh
@@ -745,7 +860,6 @@ jobs:
               -Append
 
           Write-Host "ATX Export Task=$taskId"
-
 
       - name: Poll ATX export
         shell: pwsh
@@ -850,7 +964,6 @@ jobs:
               -Encoding utf8 `
               -Append
 
-
       - name: Download TestGuide report to local runner
         shell: pwsh
         env:
@@ -871,7 +984,7 @@ jobs:
           $safeJira = "$env:JIRA_KEY".Trim()
           $safeJira = $safeJira -replace '[^A-Za-z0-9._-]', '_'
 
-          $safeEcu = "$env:TARGET_ECU".Trim()
+          $safeEcu = "$env:PROJECT_GENERATOR_TARGETECU".Trim()
           $safeEcu = $safeEcu -replace '^[^A-Za-z0-9]+', ''
           $safeEcu = $safeEcu -replace '[^A-Za-z0-9._-]', '_'
 
@@ -926,15 +1039,13 @@ jobs:
           Write-Host "Local Report=$reportFile"
           Write-Host "Size=$($fileInfo.Length) bytes"
 
-
       - name: Upload TestGuide report to GitHub Actions
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.JIRA_KEY }}_${{ env.TARGET_ECU }}_TestGuideReport
+          name: ${{ env.JIRA_KEY }}_${{ env.PROJECT_GENERATOR_TARGETECU }}_TestGuideReport
           path: ${{ env.TESTGUIDE_ATX_FILE }}
           if-no-files-found: error
           retention-days: 30
-
 
       - name: Upload local TestGuide report to JFrog
         shell: pwsh
@@ -977,7 +1088,7 @@ jobs:
           $safeJira = "$env:JIRA_KEY".Trim()
           $safeJira = $safeJira -replace '[^A-Za-z0-9._-]', '_'
 
-          $safeEcu = "$env:TARGET_ECU".Trim()
+          $safeEcu = "$env:PROJECT_GENERATOR_TARGETECU".Trim()
           $safeEcu = $safeEcu -replace '^[^A-Za-z0-9]+', ''
           $safeEcu = $safeEcu -replace '[^A-Za-z0-9._-]', '_'
 
@@ -1051,8 +1162,6 @@ jobs:
           Write-Host "URL: $uploadUrl"
           Write-Host '========================================'
 
-
-      # ONLY NEW FUNCTIONAL STEP
       - name: Add JFrog report link to Jira comment
         shell: pwsh
         env:
@@ -1103,7 +1212,7 @@ jobs:
               content = @(
                 @{
                   type = 'text'
-                  text = 'HIL Quality Gate Result'
+                  text = 'HIL CAN ID Consistency Check Result'
                 }
               )
             },
@@ -1112,7 +1221,31 @@ jobs:
               content = @(
                 @{
                   type = 'text'
-                  text = "ECU: $env:TARGET_ECU"
+                  text = "Target ECU: $env:TARGET_ECU"
+                }
+              )
+            },
+            @{
+              type = 'paragraph'
+              content = @(
+                @{
+                  type = 'text'
+                  text = (
+                    "Project Generator Target ECU: " +
+                    "$env:PROJECT_GENERATOR_TARGETECU"
+                  )
+                }
+              )
+            },
+            @{
+              type = 'paragraph'
+              content = @(
+                @{
+                  type = 'text'
+                  text = (
+                    "Project Generator CT: " +
+                    "$env:PROJECT_GENERATOR_CT"
+                  )
                 }
               )
             },
@@ -1131,6 +1264,15 @@ jobs:
                 @{
                   type = 'text'
                   text = "Resource: $env:TESTGUIDE_RESOURCE"
+                }
+              )
+            },
+            @{
+              type = 'paragraph'
+              content = @(
+                @{
+                  type = 'text'
+                  text = "Project: $env:PROJECT_RELATIVE_PATH"
                 }
               )
             },
@@ -1233,7 +1375,9 @@ jobs:
           Write-Host 'ADD JFROG LINK TO JIRA'
           Write-Host '========================================'
           Write-Host "Issue     : $jiraKey"
-          Write-Host "ECU       : $env:TARGET_ECU"
+          Write-Host "Target ECU: $env:TARGET_ECU"
+          Write-Host "PG ECU    : $env:PROJECT_GENERATOR_TARGETECU"
+          Write-Host "PG CT     : $env:PROJECT_GENERATOR_CT"
           Write-Host "Bench     : $env:BENCH_ID"
           Write-Host "Resource  : $env:TESTGUIDE_RESOURCE"
           Write-Host "Task ID   : $env:TESTGUIDE_TASK_ID"
@@ -1286,7 +1430,6 @@ jobs:
           Write-Host "Issue: $jiraKey"
           Write-Host '========================================'
 
-
       - name: Publish execution summary
         if: always()
         shell: pwsh
@@ -1300,7 +1443,10 @@ jobs:
             "| Bench | $env:BENCH_ID |"
             "| Resource | $env:TESTGUIDE_RESOURCE |"
             "| Configuration | $env:CONFIGURATION_FOLDER |"
-            "| ECU | $env:TARGET_ECU |"
+            "| Jira Target ECU | $env:TARGET_ECU |"
+            "| Project Generator Target ECU | $env:PROJECT_GENERATOR_TARGETECU |"
+            "| Project Generator CT | $env:PROJECT_GENERATOR_CT |"
+            "| Project | $env:PROJECT_RELATIVE_PATH |"
             "| Playbook ID | $env:TESTGUIDE_PLAYBOOK_ID |"
             "| Execution Task | $env:TESTGUIDE_TASK_ID |"
             "| Execution State | $env:FINAL_TASK_STATE |"
