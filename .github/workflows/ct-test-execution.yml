@@ -24,7 +24,7 @@ jobs:
       BENCH_NAME: ${{ github.event.client_payload.bench_name }}
       TARGET_ECU: ${{ github.event.client_payload.target_ecu }}
       PROJECT_GENERATOR_TARGETECU: ${{ github.event.client_payload.target_ecu }}
-      PROJECT_GENERATOR_CT: 'true'
+      PROJECT_GENERATOR_CT: 'True'
       TEST_CASES: ${{ github.event.client_payload.test_cases }}
       PLAYBOOK_NAME: ${{ github.event.client_payload.playbook_name }}
       RESOURCE_NAME: ${{ github.event.client_payload.resource_name }}
@@ -80,15 +80,6 @@ jobs:
             throw 'ONECX_PROJECT_ID must be an integer.'
           }
 
-          try {
-            $projectGeneratorCt = [System.Convert]::ToBoolean(
-              $env:PROJECT_GENERATOR_CT
-            )
-          }
-          catch {
-            throw 'PROJECT_GENERATOR_CT must be true or false.'
-          }
-
           Write-Host '========================================'
           Write-Host 'REQUEST'
           Write-Host '========================================'
@@ -97,7 +88,7 @@ jobs:
           Write-Host "Bench Name : $env:BENCH_NAME"
           Write-Host "Target ECU : $env:TARGET_ECU"
           Write-Host "PG ECU     : $env:PROJECT_GENERATOR_TARGETECU"
-          Write-Host "PG CT      : $projectGeneratorCt"
+          Write-Host "PG CT      : $env:PROJECT_GENERATOR_CT"
           Write-Host "Test Cases : $env:TEST_CASES"
           Write-Host "Playbook   : $env:PLAYBOOK_NAME"
           Write-Host "Project ID : $projectId"
@@ -212,7 +203,9 @@ jobs:
           )
 
           $projectGeneratorTargetEcu = (
-            $projectGeneratorTargetEcu -replace '^[^A-Za-z0-9]+', ''
+            $projectGeneratorTargetEcu -replace
+              '^[^A-Za-z0-9]+',
+              ''
           )
 
           if (-not $projectGeneratorTargetEcu) {
@@ -279,15 +272,6 @@ jobs:
             throw 'PROJECT_GENERATOR_TARGETECU is missing.'
           }
 
-          try {
-            $projectGeneratorCt = [System.Convert]::ToBoolean(
-              $env:PROJECT_GENERATOR_CT
-            )
-          }
-          catch {
-            throw 'PROJECT_GENERATOR_CT must be true or false.'
-          }
-
           $playbook = [ordered]@{
             metadata = [ordered]@{
               name = $env:PLAYBOOK_NAME
@@ -327,22 +311,21 @@ jobs:
               testcases = @(
                 [ordered]@{
                   relativePath = $env:PROJECT_RELATIVE_PATH
-                  stepName = $env:ECUTEST_STEP_NAME
-                  type = 'project'
 
                   constants = @(
                     [ordered]@{
-                      name = 'PROJECT_GENERATOR_TARGETECU'
-                      label = 'PROJECT_GENERATOR_TARGETECU'
-                      value = "'$projectGeneratorTargetEcu'"
+                      label = 'PROJECT_GENERATOR_CT'
+                      value = 'True'
                     },
 
                     [ordered]@{
-                      name = 'PROJECT_GENERATOR_CT'
-                      label = 'PROJECT_GENERATOR_CT'
-                      value = "True"
+                      label = 'PROJECT_GENERATOR_TARGETECU'
+                      value = "'$projectGeneratorTargetEcu'"
                     }
                   )
+
+                  stepName = $env:ECUTEST_STEP_NAME
+                  type = 'project'
                 }
               )
             }
@@ -366,15 +349,15 @@ jobs:
 
             parameters = @(
               [ordered]@{
-                name = 'PROJECT_GENERATOR_TARGETECU'
                 label = 'PROJECT_GENERATOR_TARGETECU'
                 defaultValue = "'$projectGeneratorTargetEcu'"
+                required = $false
               },
 
               [ordered]@{
-                name = 'PROJECT_GENERATOR_CT'
                 label = 'PROJECT_GENERATOR_CT'
                 defaultValue = 'True'
+                required = $false
               }
             )
           }
@@ -402,7 +385,8 @@ jobs:
           }
 
           try {
-            $null = $playbookJson | ConvertFrom-Json
+            $null = $playbookJson |
+              ConvertFrom-Json
           }
           catch {
             throw (
@@ -412,27 +396,10 @@ jobs:
           }
 
           Write-Host '========================================'
-          Write-Host 'PLAYBOOK PROJECT CONFIGURATION'
-          Write-Host '========================================'
-          Write-Host "Project Path : $env:PROJECT_RELATIVE_PATH"
-          Write-Host (
-            "PROJECT_GENERATOR_TARGETECU parameter: " +
-            $projectGeneratorTargetEcu
-          )
-          Write-Host (
-            "PROJECT_GENERATOR_TARGETECU constant : " +
-            "'$projectGeneratorTargetEcu'"
-          )
-          Write-Host (
-            "PROJECT_GENERATOR_CT parameter       : " +
-            $projectGeneratorCt
-          )
-          Write-Host (
-            "PROJECT_GENERATOR_CT constant        : " +
-            $projectGeneratorCt
-          )
+          Write-Host 'GENERATED PLAYBOOK'
           Write-Host '========================================'
           Write-Host $playbookJson
+          Write-Host '========================================'
 
           "TESTGUIDE_PLAYBOOK_FILE=$playbookFile" |
             Out-File `
@@ -463,8 +430,6 @@ jobs:
           $body = Get-Content `
             -LiteralPath $env:TESTGUIDE_PLAYBOOK_FILE `
             -Raw
-
-          Write-Host 'Uploading playbook.'
 
           $response = Invoke-RestMethod `
             -Method POST `
@@ -514,10 +479,6 @@ jobs:
             "$env:PROJECT_GENERATOR_TARGETECU".Trim()
           )
 
-          $projectGeneratorCt = [System.Convert]::ToBoolean(
-            $env:PROJECT_GENERATOR_CT
-          )
-
           $request = [ordered]@{
             name = (
               "$env:JIRA_KEY - " +
@@ -528,13 +489,11 @@ jobs:
 
             parameters = @(
               [ordered]@{
-                name = 'PROJECT_GENERATOR_TARGETECU'
                 label = 'PROJECT_GENERATOR_TARGETECU'
                 value = "'$projectGeneratorTargetEcu'"
               },
 
               [ordered]@{
-                name = 'PROJECT_GENERATOR_CT'
                 label = 'PROJECT_GENERATOR_CT'
                 value = 'True'
               }
@@ -559,17 +518,8 @@ jobs:
           Write-Host '========================================'
           Write-Host 'EXECUTION REQUEST'
           Write-Host '========================================'
-          Write-Host "Project Path : $env:PROJECT_RELATIVE_PATH"
-          Write-Host (
-            "PROJECT_GENERATOR_TARGETECU : " +
-            $projectGeneratorTargetEcu
-          )
-          Write-Host (
-            "PROJECT_GENERATOR_CT        : " +
-            $projectGeneratorCt
-          )
-          Write-Host '========================================'
           Write-Host $requestJson
+          Write-Host '========================================'
 
           $response = Invoke-RestMethod `
             -Method POST `
@@ -747,24 +697,52 @@ jobs:
             'Accept' = 'application/json'
           }
 
+          $taskId = "$env:TESTGUIDE_TASK_ID".Trim()
+          $targetEcu = "$env:PROJECT_GENERATOR_TARGETECU".Trim()
+          $targetEcuClean = $targetEcu.Trim("'`"")
+
+          if (-not $taskId) {
+            throw 'TESTGUIDE_TASK_ID is missing.'
+          }
+
+          if (-not $targetEcuClean) {
+            throw 'PROJECT_GENERATOR_TARGETECU is missing.'
+          }
+
           $taskStart = Get-Date $env:TASK_START_DATE
           $taskEnd = Get-Date $env:TASK_END_DATE
 
           $windowStart = $taskStart.AddMinutes(-2)
-          $windowEnd = $taskEnd.AddMinutes(20)
+          $windowEnd = $taskEnd.AddMinutes(30)
 
-          $expectedPlan = 'CAN_ID_Consistency_Check'
-
-          $deadline = (Get-Date).AddMinutes(15)
+          $deadline = (Get-Date).AddMinutes(20)
           $selectedReport = $null
 
+          $escapedTaskId = [regex]::Escape($taskId)
+          $escapedEcu = [regex]::Escape($targetEcuClean)
+
+          Write-Host '========================================'
+          Write-Host 'REPORT MATCHING'
+          Write-Host '========================================'
+          Write-Host "Task ID      : $taskId"
+          Write-Host "Target ECU   : $targetEcuClean"
+          Write-Host "Task Start   : $taskStart"
+          Write-Host "Task End     : $taskEnd"
+          Write-Host "Window Start : $windowStart"
+          Write-Host "Window End   : $windowEnd"
+          Write-Host '========================================'
+
           while ((Get-Date) -lt $deadline) {
-            $startDate = $windowStart.ToString(
-              'yyyy-MM-ddTHH:mm:ss.fffZ'
+            $startDate = (
+              $windowStart.ToUniversalTime().ToString(
+                'yyyy-MM-ddTHH:mm:ss.fffZ'
+              )
             )
 
-            $endDate = $windowEnd.ToString(
-              'yyyy-MM-ddTHH:mm:ss.fffZ'
+            $endDate = (
+              $windowEnd.ToUniversalTime().ToString(
+                'yyyy-MM-ddTHH:mm:ss.fffZ'
+              )
             )
 
             $url = (
@@ -784,32 +762,147 @@ jobs:
 
             $reports = @($response)
 
+            Write-Host '========================================'
+            Write-Host "REPORTS RETURNED: $($reports.Count)"
+            Write-Host '========================================'
+
+            foreach ($report in $reports) {
+              $reportJson = (
+                $report |
+                  ConvertTo-Json `
+                    -Depth 20 `
+                    -Compress
+              )
+
+              Write-Host '----------------------------------------'
+              Write-Host "Report ID     : $($report.reportId)"
+              Write-Host "Plan          : $($report.testPlanName)"
+              Write-Host "Status        : $($report.status)"
+              Write-Host "Execution     : $($report.executionDate)"
+              Write-Host "Upload        : $($report.uploadDate)"
+              Write-Host "Task ID       : $($report.taskId)"
+              Write-Host "ExecutionTask : $($report.executionTaskId)"
+              Write-Host "ECU           : $($report.ecu)"
+              Write-Host "Target ECU    : $($report.targetEcu)"
+              Write-Host "Raw Report    : $reportJson"
+            }
+
             $matches = @(
               $reports |
                 Where-Object {
-                  $name = "$($_.testPlanName)".Trim()
+                  $report = $_
 
                   $status = (
-                    "$($_.status)".Trim().ToUpperInvariant()
+                    "$($report.status)".Trim().ToUpperInvariant()
                   )
 
-                  $executionText = "$($_.executionDate)".Trim()
+                  if ($status -ne 'COMPLETE') {
+                    return $false
+                  }
+
+                  $executionText = (
+                    "$($report.executionDate)".Trim()
+                  )
 
                   if (-not $executionText) {
                     return $false
                   }
 
-                  $executionDate = Get-Date $executionText
+                  try {
+                    $executionDate = Get-Date $executionText
+                  }
+                  catch {
+                    return $false
+                  }
 
-                  return (
-                    $name -ieq $expectedPlan -and
-                    $status -eq 'COMPLETE' -and
-                    $executionDate -ge $windowStart -and
-                    $executionDate -le $windowEnd
+                  if (
+                    $executionDate -lt $windowStart -or
+                    $executionDate -gt $windowEnd
+                  ) {
+                    return $false
+                  }
+
+                  $reportJson = (
+                    $report |
+                      ConvertTo-Json `
+                        -Depth 20 `
+                        -Compress
                   )
+
+                  $taskMatch = $false
+
+                  if (
+                    "$($report.taskId)".Trim() -eq $taskId
+                  ) {
+                    $taskMatch = $true
+                  }
+
+                  if (
+                    "$($report.executionTaskId)".Trim() -eq $taskId
+                  ) {
+                    $taskMatch = $true
+                  }
+
+                  if (
+                    $null -ne $report.executionTask -and
+                    "$($report.executionTask.id)".Trim() -eq $taskId
+                  ) {
+                    $taskMatch = $true
+                  }
+
+                  if (
+                    -not $taskMatch -and
+                    $reportJson -match $escapedTaskId
+                  ) {
+                    $taskMatch = $true
+                  }
+
+                  $ecuMatch = $false
+
+                  if (
+                    "$($report.ecu)".Trim() -ieq $targetEcuClean
+                  ) {
+                    $ecuMatch = $true
+                  }
+
+                  if (
+                    "$($report.targetEcu)".Trim() -ieq $targetEcuClean
+                  ) {
+                    $ecuMatch = $true
+                  }
+
+                  if (
+                    "$($report.testPlanName)".Trim() -match
+                    $escapedEcu
+                  ) {
+                    $ecuMatch = $true
+                  }
+
+                  if (
+                    -not $ecuMatch -and
+                    $reportJson -match $escapedEcu
+                  ) {
+                    $ecuMatch = $true
+                  }
+
+                  if ($taskMatch -and $ecuMatch) {
+                    Write-Host (
+                      "MATCH: ReportId=$($report.reportId) " +
+                      "Task=$taskId ECU=$targetEcuClean"
+                    )
+
+                    return $true
+                  }
+
+                  return $false
                 } |
                 Sort-Object {
-                  Get-Date "$($_.uploadDate)"
+                  try {
+                    Get-Date "$($_.uploadDate)"
+                  }
+                  catch {
+                    [datetime]::MinValue
+                  }
                 } -Descending
             )
 
@@ -818,13 +911,21 @@ jobs:
               break
             }
 
-            Write-Host "Waiting for TestGuide report: $expectedPlan"
+            Write-Host (
+              "No COMPLETE report matches Task ID=" +
+              "$taskId and ECU=$targetEcuClean yet."
+            )
+
+            Write-Host 'Retrying in 15 seconds.'
 
             Start-Sleep -Seconds 15
           }
 
           if ($null -eq $selectedReport) {
-            throw "No TestGuide report found for $expectedPlan."
+            throw (
+              "No TestGuide report found matching " +
+              "Task ID=$taskId and ECU=$targetEcuClean."
+            )
           }
 
           $reportId = "$($selectedReport.reportId)".Trim()
@@ -844,7 +945,16 @@ jobs:
               -Encoding utf8 `
               -Append
 
-          Write-Host "Report ID=$reportId"
+          Write-Host '========================================'
+          Write-Host 'REPORT SELECTED'
+          Write-Host '========================================'
+          Write-Host "ECU       : $targetEcuClean"
+          Write-Host "Task ID   : $taskId"
+          Write-Host "Report ID : $reportId"
+          Write-Host "Plan      : $($selectedReport.testPlanName)"
+          Write-Host "Execution : $($selectedReport.executionDate)"
+          Write-Host "Upload    : $($selectedReport.uploadDate)"
+          Write-Host '========================================'
 
       - name: Start ATX export
         shell: pwsh
@@ -1014,7 +1124,6 @@ jobs:
           $safeJira = $safeJira -replace '[^A-Za-z0-9._-]', '_'
 
           $safeEcu = "$env:PROJECT_GENERATOR_TARGETECU".Trim()
-          $safeEcu = $safeEcu -replace '^[^A-Za-z0-9]+', ''
           $safeEcu = $safeEcu -replace '[^A-Za-z0-9._-]', '_'
 
           $reportFile = Join-Path `
@@ -1029,13 +1138,6 @@ jobs:
           $headers = @{
             'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
           }
-
-          Write-Host '========================================'
-          Write-Host 'DOWNLOAD TO LOCAL RUNNER'
-          Write-Host '========================================'
-          Write-Host "URL  : $downloadUrl"
-          Write-Host "File : $reportFile"
-          Write-Host '========================================'
 
           Invoke-WebRequest `
             -Method GET `
@@ -1118,7 +1220,6 @@ jobs:
           $safeJira = $safeJira -replace '[^A-Za-z0-9._-]', '_'
 
           $safeEcu = "$env:PROJECT_GENERATOR_TARGETECU".Trim()
-          $safeEcu = $safeEcu -replace '^[^A-Za-z0-9]+', ''
           $safeEcu = $safeEcu -replace '[^A-Za-z0-9._-]', '_'
 
           $artifactPath = (
@@ -1134,17 +1235,6 @@ jobs:
             "$env:JFROG_REPOSITORY/" +
             "$artifactPath"
           )
-
-          Write-Host '========================================'
-          Write-Host 'LOCAL RUNNER TO JFROG'
-          Write-Host '========================================'
-          Write-Host "User       : $jfrogUser"
-          Write-Host "Repository : $env:JFROG_REPOSITORY"
-          Write-Host "Runner File: $($fileInfo.FullName)"
-          Write-Host "Size       : $($fileInfo.Length) bytes"
-          Write-Host "JFrog Path : $artifactPath"
-          Write-Host "JFrog URL  : $uploadUrl"
-          Write-Host '========================================'
 
           $curlArguments = @(
             '--fail-with-body'
@@ -1185,11 +1275,7 @@ jobs:
               -Encoding utf8 `
               -Append
 
-          Write-Host '========================================'
-          Write-Host 'JFROG UPLOAD COMPLETE'
-          Write-Host '========================================'
-          Write-Host "URL: $uploadUrl"
-          Write-Host '========================================'
+          Write-Host "JFrog URL=$uploadUrl"
 
       - name: Add JFrog report link to Jira comment
         shell: pwsh
@@ -1299,17 +1385,7 @@ jobs:
             @{
               type = 'paragraph'
               content = @(
-                @{
-                  type = 'text'
-                  text = "Project: $env:PROJECT_RELATIVE_PATH"
-                }
-              )
-            },
-            @{
-              type = 'paragraph'
-              content = @(
-                @{
-                  type = 'text'
+          type = 'text'
                   text = "Playbook ID: $env:TESTGUIDE_PLAYBOOK_ID"
                 }
               )
@@ -1400,22 +1476,6 @@ jobs:
               -LiteralPath $jsonFile `
               -Encoding utf8
 
-          Write-Host '========================================'
-          Write-Host 'ADD JFROG LINK TO JIRA'
-          Write-Host '========================================'
-          Write-Host "Issue     : $jiraKey"
-          Write-Host "Target ECU: $env:TARGET_ECU"
-          Write-Host "PG ECU    : $env:PROJECT_GENERATOR_TARGETECU"
-          Write-Host "PG CT     : $env:PROJECT_GENERATOR_CT"
-          Write-Host "Bench     : $env:BENCH_ID"
-          Write-Host "Resource  : $env:TESTGUIDE_RESOURCE"
-          Write-Host "Task ID   : $env:TESTGUIDE_TASK_ID"
-          Write-Host "Report ID : $env:TESTGUIDE_REPORT_ID"
-          Write-Host "State     : $env:FINAL_TASK_STATE"
-          Write-Host "Verdict   : $env:FINAL_TASK_VERDICT"
-          Write-Host "JFrog URL : $reportUrl"
-          Write-Host '========================================'
-
           $curlArguments = @(
             '--fail-with-body'
             '--silent'
@@ -1452,12 +1512,6 @@ jobs:
               -FilePath $env:GITHUB_ENV `
               -Encoding utf8 `
               -Append
-
-          Write-Host '========================================'
-          Write-Host 'JIRA COMMENT ADDED'
-          Write-Host '========================================'
-          Write-Host "Issue: $jiraKey"
-          Write-Host '========================================'
 
       - name: Publish execution summary
         if: always()
