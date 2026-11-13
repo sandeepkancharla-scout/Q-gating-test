@@ -340,7 +340,7 @@ jobs:
                     [ordered]@{
                       name = 'PROJECT_GENERATOR_CT'
                       label = 'PROJECT_GENERATOR_CT'
-                      value = 'True'
+                      value = "True"
                     }
                   )
                 }
