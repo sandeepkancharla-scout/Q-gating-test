@@ -11,16 +11,13 @@ permissions:
 env:
   ONECX_URL: https://testguide-ssp.onecx.vwgroup.com
   ONECX_PROJECT_ID: ${{ vars.ONECX_PROJECT_ID }}
-
   JFROG_URL: https://artifactory.sctmtrs.xyz/artifactory
   JFROG_REPOSITORY: eeint-report-files
-
   JIRA_BASE_URL: https://scoutmotors.atlassian.net
 
 jobs:
   l2-quality-gate:
     name: L2 Quality Gate
-
     runs-on:
       - self-hosted
       - Windows
@@ -33,23 +30,21 @@ jobs:
       cancel-in-progress: false
 
     steps:
-
       # ============================================================
       # 1. PARSE JIRA INPUTS
       # ============================================================
 
-      - name: Parse and validate Jira inputs
+      - name: Parse Jira inputs
         shell: pwsh
-
         env:
           JIRA_KEY_RAW: ${{ github.event.client_payload.jira_key }}
           CATEGORY_RAW: ${{ github.event.client_payload.category }}
-          CW_RELEASE_RAW: ${{ github.event.client_payload.cw_release }}
-          TEST_BENCH_RAW: ${{ github.event.client_payload.test_bench }}
-          TARGET_ECU_RAW: ${{ github.event.client_payload.target_ecu }}
-          FLASH_ARCHIVE_RAW: ${{ github.event.client_payload.flash_archive_location }}
-          RAL_FILE_RAW: ${{ github.event.client_payload.ral_file_location }}
-          GIT_SUBMODULE_RAW: ${{ github.event.client_payload.git_submodule }}
+          CW_RAW: ${{ github.event.client_payload.cw_release }}
+          BENCH_RAW: ${{ github.event.client_payload.test_bench }}
+          ECU_RAW: ${{ github.event.client_payload.target_ecu }}
+          FLASH_RAW: ${{ github.event.client_payload.flash_archive_location }}
+          RAL_RAW: ${{ github.event.client_payload.ral_file_location }}
+          SUBMODULE_RAW: ${{ github.event.client_payload.git_submodule }}
           TEST_CASES_RAW: ${{ github.event.client_payload.test_cases }}
 
         run: |
@@ -62,10 +57,9 @@ jobs:
                   return ''
               }
 
-              $result = "$Value".Trim()
-              $result = $result -replace '[\r\n]+', ''
-
-              return $result.Trim()
+              return (
+                  "$Value" -replace '[\r\n]+', ' '
+              ).Trim()
           }
 
           function Clean-Path {
@@ -88,175 +82,139 @@ jobs:
               return $result
           }
 
-          $jiraKey =
+          $jira =
               Clean-Value $env:JIRA_KEY_RAW
 
-          $categoryInput =
+          $category =
               Clean-Value $env:CATEGORY_RAW
 
-          $cwRelease =
-              Clean-Value $env:CW_RELEASE_RAW
+          $cw =
+              (
+                  Clean-Value $env:CW_RAW
+              ).ToUpperInvariant()
 
-          $testBench =
-              Clean-Value $env:TEST_BENCH_RAW
+          $bench =
+              (
+                  Clean-Value $env:BENCH_RAW
+              ).ToLowerInvariant()
 
-          $targetEcu =
-              Clean-Value $env:TARGET_ECU_RAW
+          $ecu =
+              Clean-Value $env:ECU_RAW
 
-          $flashArchive =
-              Clean-Path $env:FLASH_ARCHIVE_RAW
+          $flash =
+              Clean-Path $env:FLASH_RAW
 
-          $ralFile =
-              Clean-Path $env:RAL_FILE_RAW
+          $ral =
+              Clean-Path $env:RAL_RAW
 
-          $gitSubmodule =
-              Clean-Value $env:GIT_SUBMODULE_RAW
+          $submodule =
+              Clean-Value $env:SUBMODULE_RAW
 
           $testCases =
               Clean-Value $env:TEST_CASES_RAW
 
-
-          $cwRelease =
-              $cwRelease.ToUpperInvariant()
-
-          $testBench =
-              $testBench.ToLowerInvariant()
-
-
-          if (-not $jiraKey) {
+          if (-not $jira) {
               throw 'jira_key is missing.'
           }
 
-          if (-not $categoryInput) {
+          if (-not $category) {
               throw 'category is missing.'
           }
 
-          if (-not $cwRelease) {
-              throw 'cw_release is missing.'
+          if ($cw -notmatch '^CW[0-9]{2}$') {
+              throw "Invalid CW release: $cw"
           }
-
-          if (-not $testBench) {
-              throw 'test_bench is missing.'
-          }
-
-          if (-not $targetEcu) {
-              throw 'target_ecu is missing.'
-          }
-
-
-          if ($cwRelease -notmatch '^CW[0-9]{2}$') {
-              throw (
-                  "Invalid CW Release '$cwRelease'. " +
-                  'Expected value such as CW45.'
-              )
-          }
-
-
-          switch ($categoryInput.ToLowerInvariant()) {
-
-              'network_test' {
-                  $categoryInput =
-                      'Network_Test'
-              }
-
-              'network_testing' {
-                  $categoryInput =
-                      'Network_Test'
-              }
-
-              'diagnostic_test' {
-                  $categoryInput =
-                      'Diagnostic_Test'
-              }
-
-              'diagnostic_testing' {
-                  $categoryInput =
-                      'Diagnostic_Test'
-              }
-
-              'bootloader_compliance_test' {
-                  $categoryInput =
-                      'Bootloader_Compliance_Test'
-              }
-
-              default {
-                  throw (
-                      "Unsupported category: " +
-                      "$categoryInput"
-                  )
-              }
-          }
-
 
           if (
-              $testBench -notin @(
+              $bench -notin @(
                   'syshil1',
                   'syshil2'
               )
           ) {
-              throw "Unsupported bench: $testBench"
+              throw "Unsupported bench: $bench"
           }
 
+          if (-not $ecu) {
+              throw 'target_ecu is missing.'
+          }
 
-          if (
-              $categoryInput -eq
-              'Diagnostic_Test'
-          ) {
-              if (-not $ralFile) {
-                  throw (
-                      'Diagnostic_Test requires ' +
-                      'RAL File Location.'
-                  )
+          switch ($category.ToLowerInvariant()) {
+              'network_test' {
+                  $category = 'Network_Test'
+              }
+
+              'network_testing' {
+                  $category = 'Network_Test'
+              }
+
+              'diagnostic_test' {
+                  $category = 'Diagnostic_Test'
+              }
+
+              'diagnostic_testing' {
+                  $category = 'Diagnostic_Test'
+              }
+
+              'bootloader_compliance_test' {
+                  $category =
+                      'Bootloader_Compliance_Test'
+              }
+
+              default {
+                  throw "Unsupported category: $category"
               }
           }
 
-
           if (
-              $categoryInput -eq
-              'Bootloader_Compliance_Test'
+              $category -eq 'Diagnostic_Test' -and
+              -not $ral
           ) {
-              if (-not $flashArchive) {
-                  throw (
-                      'Bootloader_Compliance_Test requires ' +
-                      'Flash Archieve Location.'
-                  )
-              }
+              throw (
+                  'Diagnostic_Test requires ' +
+                  'ral_file_location.'
+              )
           }
 
+          if (
+              $category -eq 'Bootloader_Compliance_Test' -and
+              -not $flash
+          ) {
+              throw (
+                  'Bootloader_Compliance_Test requires ' +
+                  'flash_archive_location.'
+              )
+          }
 
           $values = [ordered]@{
-
               JIRA_KEY =
-                  $jiraKey
+                  $jira
 
               CATEGORY_INPUT =
-                  $categoryInput
+                  $category
 
               CW_RELEASE =
-                  $cwRelease
+                  $cw
 
               TEST_BENCH =
-                  $testBench
+                  $bench
 
               TARGET_ECU =
-                  $targetEcu
+                  $ecu
 
               FLASH_ARCHIVE_LOCATION =
-                  $flashArchive
+                  $flash
 
               RAL_FILE_LOCATION =
-                  $ralFile
+                  $ral
 
               GIT_SUBMODULE =
-                  $gitSubmodule
+                  $submodule
 
               TEST_CASES =
                   $testCases
           }
 
-
           foreach ($item in $values.GetEnumerator()) {
-
               "$($item.Key)=$($item.Value)" |
                   Out-File `
                       -FilePath $env:GITHUB_ENV `
@@ -264,42 +222,32 @@ jobs:
                       -Encoding utf8
           }
 
-
           Write-Host ''
           Write-Host '========================================'
           Write-Host 'JIRA INPUTS'
           Write-Host '========================================'
-
-          Write-Host "Jira       : $jiraKey"
-          Write-Host "Category   : $categoryInput"
-          Write-Host "CW         : $cwRelease"
-          Write-Host "Bench      : $testBench"
-          Write-Host "ECU        : $targetEcu"
-          Write-Host "Flash File : $flashArchive"
-          Write-Host "RAL File   : $ralFile"
-          Write-Host "Submodule  : $gitSubmodule"
+          Write-Host "Jira       : $jira"
+          Write-Host "Category   : $category"
+          Write-Host "CW         : $cw"
+          Write-Host "Bench      : $bench"
+          Write-Host "ECU        : $ecu"
+          Write-Host "Flash File : $flash"
+          Write-Host "RAL File   : $ral"
+          Write-Host "Submodule  : $submodule"
           Write-Host "Test Cases : $testCases"
-
           Write-Host '========================================'
 
-
       # ============================================================
-      # 2. CHECKOUT PIPELINE
+      # 2. CHECKOUT
       # ============================================================
 
-      - name: Checkout Q-gating-test
+      - name: Checkout pipeline repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-
-      # ============================================================
-      # 3. CHECKOUT L2 QUALITY GATE
-      # ============================================================
-
       - name: Checkout L2 Quality Gate
         uses: actions/checkout@v4
-
         with:
           repository: scout-motors/eeint-L2-Quality-Gate
           token: ${{ secrets.HIL_REPO_PAT }}
@@ -307,70 +255,39 @@ jobs:
           fetch-depth: 1
           submodules: recursive
 
-
       # ============================================================
-      # 4. ROUTE EXACTLY ONE CATEGORY
+      # 3. ROUTE CATEGORY AND PREPARE WORKSPACE
       # ============================================================
 
-      - name: Route selected category
+      - name: Route category and prepare workspace
         shell: pwsh
 
         run: |
           $ErrorActionPreference = 'Stop'
 
-
           switch ($env:CATEGORY_INPUT) {
-
               'Network_Test' {
-
-                  $category =
-                      'network-testing'
-
-                  $testOrValidator =
-                      'NetworkTest'
-
-                  $playbookName =
-                      'L2-network-testing'
-
-                  $projectRelative =
-                      'Packages\L2-Quality-Gate\ProjectGenerator\Network-Test\NetworkTest.prj'
+                  $category = 'network-testing'
+                  $testName = 'NetworkTest'
+                  $playbookName = 'L2-network-testing'
+                  $project = 'Packages\L2-Quality-Gate\ProjectGenerator\Network-Test\NetworkTest.prj'
               }
-
 
               'Diagnostic_Test' {
-
-                  $category =
-                      'diagnostic-testing'
-
-                  $testOrValidator =
-                      'DiagnosticTest'
-
-                  $playbookName =
-                      'L2-Diagnostic-testing'
-
-                  $projectRelative =
-                      'Packages\L2-Quality-Gate\ProjectGenerator\Diagnostic-Test\DiagnosticTest.prj'
+                  $category = 'diagnostic-testing'
+                  $testName = 'DiagnosticTest'
+                  $playbookName = 'L2-Diagnostic-testing'
+                  $project = 'Packages\L2-Quality-Gate\ProjectGenerator\Diagnostic-Test\DiagnosticTest.prj'
               }
-
 
               'Bootloader_Compliance_Test' {
-
-                  $category =
-                      'bootloader-compliance'
-
-                  $testOrValidator =
-                      'BootloaderComplianceTest'
-
-                  $playbookName =
-                      'L2-Bootloader-testing'
-
-                  $projectRelative =
-                      'Packages\L2-Quality-Gate\ProjectGenerator\Bootloader-Compliance-Test\BootloaderComplianceTest.prj'
+                  $category = 'bootloader-compliance'
+                  $testName = 'BootloaderComplianceTest'
+                  $playbookName = 'L2-Bootloader-testing'
+                  $project = 'Packages\L2-Quality-Gate\ProjectGenerator\Bootloader-Compliance-Test\BootloaderComplianceTest.prj'
               }
 
-
               default {
-
                   throw (
                       "Unsupported category: " +
                       "$env:CATEGORY_INPUT"
@@ -378,55 +295,18 @@ jobs:
               }
           }
 
-
-          # Never allow quotes inside relativePath.
-          $projectRelative =
-              $projectRelative.Trim().Trim('"')
-
-
-          if ($projectRelative.Contains('"')) {
-
-              throw (
-                  'Illegal quote inside project path: ' +
-                  "$projectRelative"
-              )
-          }
-
-
-          # ========================================================
-          # BENCH / RESOURCE MAPPING
-          # ========================================================
-
           switch ($env:TEST_BENCH) {
-
               'syshil1' {
-
-                  $resource =
-                      'syshil1-labtest1'
-
-                  $workspace =
-                      'C:\HIL\Testing\eeint-Test-Automation'
-
-                  $configurationFolder =
-                      'SUBSYS1'
+                  $resource = 'syshil1-labtest1'
+                  $configurationFolder = 'SUBSYS1'
               }
-
 
               'syshil2' {
-
-                  $resource =
-                      'syshil2-labtest2'
-
-                  $workspace =
-                      'C:\HIL\Testing\eeint-Test-Automation'
-
-                  $configurationFolder =
-                      'SUBSYS1'
+                  $resource = 'syshil2-labtest2'
+                  $configurationFolder = 'SUBSYS1'
               }
 
-
               default {
-
                   throw (
                       "Unsupported bench: " +
                       "$env:TEST_BENCH"
@@ -434,46 +314,49 @@ jobs:
               }
           }
 
+          $workspace =
+              'C:\HIL\Testing\eeint-Test-Automation'
 
-          # ========================================================
-          # COPY L2 PACKAGE INTO ECU-TEST WORKSPACE
-          # ========================================================
+          $project =
+              $project.Trim().Trim('"')
 
-          $sourceL2 =
+          if ($project.Contains('"')) {
+              throw (
+                  "Illegal quote inside project path: " +
+                  "$project"
+              )
+          }
+
+          $source =
               Join-Path `
                   $env:GITHUB_WORKSPACE `
                   'source-l2'
 
-
-          $destinationL2 =
+          $destination =
               Join-Path `
                   $workspace `
                   'Packages\L2-Quality-Gate'
 
-
           New-Item `
               -ItemType Directory `
-              -Path $destinationL2 `
+              -Path $destination `
               -Force |
               Out-Null
-
 
           Copy-Item `
               -Path (
                   Join-Path `
-                      $sourceL2 `
+                      $source `
                       '*'
               ) `
-              -Destination $destinationL2 `
+              -Destination $destination `
               -Recurse `
               -Force
-
 
           $fullProject =
               Join-Path `
                   $workspace `
-                  $projectRelative
-
+                  $project
 
           if (
               -not (
@@ -482,117 +365,86 @@ jobs:
                       -PathType Leaf
               )
           ) {
-
-              throw (
-                  "Project does not exist: " +
-                  "$fullProject"
-              )
+              throw "Project does not exist: $fullProject"
           }
 
-
-          # ========================================================
-          # CONFIGURATION STEP
-          # ========================================================
-
-          $tbcRelative = (
+          $tbc = (
               "Configurations\" +
               "$configurationFolder\" +
               "${configurationFolder}_TestBenchConfig.tbc"
           )
 
-
-          $tcfRelative = (
+          $tcf = (
               "Configurations\" +
               "$configurationFolder\" +
               "${configurationFolder}_TestConfig.tcf"
           )
 
-
-          $fullTbc =
-              Join-Path `
-                  $workspace `
-                  $tbcRelative
-
-
-          $fullTcf =
-              Join-Path `
-                  $workspace `
-                  $tcfRelative
-
-
-          if (-not (Test-Path $fullTbc)) {
-
-              throw "TBC is missing: $fullTbc"
+          if (
+              -not (
+                  Test-Path `
+                      -LiteralPath (
+                          Join-Path `
+                              $workspace `
+                              $tbc
+                      ) `
+                      -PathType Leaf
+              )
+          ) {
+              throw "TBC is missing: $tbc"
           }
-
-
-          if (-not (Test-Path $fullTcf)) {
-
-              throw "TCF is missing: $fullTcf"
-          }
-
-
-          # ========================================================
-          # CATEGORY FILE VALIDATION
-          # ========================================================
 
           if (
-              $env:CATEGORY_INPUT -eq
-              'Diagnostic_Test'
+              -not (
+                  Test-Path `
+                      -LiteralPath (
+                          Join-Path `
+                              $workspace `
+                              $tcf
+                      ) `
+                      -PathType Leaf
+              )
           ) {
-
-              if (
-                  -not (
-                      Test-Path `
-                          -LiteralPath $env:RAL_FILE_LOCATION `
-                          -PathType Leaf
-                  )
-              ) {
-
-                  throw (
-                      'Diagnostic RAL file does not exist: ' +
-                      "$env:RAL_FILE_LOCATION"
-                  )
-              }
+              throw "TCF is missing: $tcf"
           }
-
 
           if (
-              $env:CATEGORY_INPUT -eq
-              'Bootloader_Compliance_Test'
+              $env:CATEGORY_INPUT -eq 'Diagnostic_Test' -and
+              -not (
+                  Test-Path `
+                      -LiteralPath $env:RAL_FILE_LOCATION `
+                      -PathType Leaf
+              )
           ) {
-
-              if (
-                  -not (
-                      Test-Path `
-                          -LiteralPath $env:FLASH_ARCHIVE_LOCATION `
-                          -PathType Leaf
-                  )
-              ) {
-
-                  throw (
-                      'Bootloader HEX file does not exist: ' +
-                      "$env:FLASH_ARCHIVE_LOCATION"
-                  )
-              }
+              throw (
+                  "RAL file does not exist: " +
+                  "$env:RAL_FILE_LOCATION"
+              )
           }
 
-
-          # ========================================================
-          # ARTIFACT DIRECTORY
-          # ========================================================
+          if (
+              $env:CATEGORY_INPUT -eq 'Bootloader_Compliance_Test' -and
+              -not (
+                  Test-Path `
+                      -LiteralPath $env:FLASH_ARCHIVE_LOCATION `
+                      -PathType Leaf
+              )
+          ) {
+              throw (
+                  "Bootloader file does not exist: " +
+                  "$env:FLASH_ARCHIVE_LOCATION"
+              )
+          }
 
           $artifactRoot =
               Join-Path `
                   $env:RUNNER_TEMP `
                   'l2-artifacts'
 
-
           $atxDirectory =
               Join-Path `
                   $artifactRoot `
                   'atx'
-
 
           New-Item `
               -ItemType Directory `
@@ -600,25 +452,18 @@ jobs:
               -Force |
               Out-Null
 
-
-          $timestamp =
-              Get-Date `
-                  -Format 'yyyy-MM-dd_HHmmss'
-
-
           $values = [ordered]@{
-
               CATEGORY =
                   $category
 
               TEST_OR_VALIDATOR =
-                  $testOrValidator
+                  $testName
 
               PLAYBOOK_NAME =
                   $playbookName
 
               PROJECT_RELATIVE_PATH =
-                  $projectRelative
+                  $project
 
               RESOURCE_NAME =
                   $resource
@@ -627,10 +472,10 @@ jobs:
                   $workspace
 
               TBC_RELATIVE_PATH =
-                  $tbcRelative
+                  $tbc
 
               TCF_RELATIVE_PATH =
-                  $tcfRelative
+                  $tcf
 
               XIL_IDENTIFIER =
                   "novi_hq/1stfloor/ee_lab_novi/$resource/ControlComputer"
@@ -642,12 +487,10 @@ jobs:
                   $atxDirectory
 
               RUN_TIMESTAMP =
-                  $timestamp
+                  Get-Date -Format 'yyyy-MM-dd_HHmmss'
           }
 
-
           foreach ($item in $values.GetEnumerator()) {
-
               "$($item.Key)=$($item.Value)" |
                   Out-File `
                       -FilePath $env:GITHUB_ENV `
@@ -655,24 +498,20 @@ jobs:
                       -Encoding utf8
           }
 
-
           Write-Host ''
           Write-Host '========================================'
           Write-Host 'SELECTED EXECUTION'
           Write-Host '========================================'
-
-          Write-Host "Jira Category : $env:CATEGORY_INPUT"
-          Write-Host "Playbook      : $playbookName"
-          Write-Host "Project       : [$projectRelative]"
-          Write-Host "Resource      : $resource"
-          Write-Host "TBC           : $tbcRelative"
-          Write-Host "TCF           : $tcfRelative"
-
+          Write-Host "Category : $category"
+          Write-Host "Playbook : $playbookName"
+          Write-Host "Project  : [$project]"
+          Write-Host "Resource : $resource"
+          Write-Host "TBC      : $tbc"
+          Write-Host "TCF      : $tcf"
           Write-Host '========================================'
 
-
       # ============================================================
-      # 5. GENERATE ONLY THE SELECTED PLAYBOOK
+      # 4. GENERATE SELECTED PLAYBOOK
       # ============================================================
 
       - name: Generate selected TestGuide playbook
@@ -681,39 +520,17 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-
-          function Convert-ToEcuTestPathExpression {
-
-              param(
-                  [Parameter(Mandatory = $true)]
-                  [string]$Path
-              )
-
+          function Convert-ToExpressionPath {
+              param([string]$Path)
 
               $clean =
-                  $Path.Trim()
-
-
-              while (
-                  $clean.Length -ge 2 -and
-                  $clean.StartsWith('"') -and
-                  $clean.EndsWith('"')
-              ) {
-
-                  $clean =
-                      $clean.Substring(
-                          1,
-                          $clean.Length - 2
-                      ).Trim()
-              }
-
+                  $Path.Trim().Trim('"')
 
               $escaped =
                   $clean.Replace(
                       '\',
                       '\\'
                   )
-
 
               return (
                   '"' +
@@ -722,164 +539,79 @@ jobs:
               )
           }
 
-
-          $targetEcuExpression = (
+          $ecuExpression =
               "'" +
               $env:TARGET_ECU +
               "'"
-          )
-
-
-          # ========================================================
-          # COMMON CONSTANTS
-          # ========================================================
 
           $constants = @(
-
               [ordered]@{
-
-                  label =
-                      'PROJECT_GENERATOR_TARGETECU'
-
-                  value =
-                      $targetEcuExpression
+                  label = 'PROJECT_GENERATOR_TARGETECU'
+                  value = $ecuExpression
               },
 
               [ordered]@{
-
-                  label =
-                      'PROJECT_GENERATOR_CT'
-
-                  value =
-                      'True'
+                  label = 'PROJECT_GENERATOR_CT'
+                  value = 'True'
               }
           )
-
 
           $parameters = @(
-
               [ordered]@{
-
-                  label =
-                      'PROJECT_GENERATOR_TARGETECU'
-
-                  defaultValue =
-                      $targetEcuExpression
-
-                  required =
-                      $false
+                  label = 'PROJECT_GENERATOR_TARGETECU'
+                  defaultValue = $ecuExpression
+                  required = $false
               },
 
               [ordered]@{
-
-                  label =
-                      'PROJECT_GENERATOR_CT'
-
-                  defaultValue =
-                      'True'
-
-                  required =
-                      $false
+                  label = 'PROJECT_GENERATOR_CT'
+                  defaultValue = 'True'
+                  required = $false
               }
           )
-
-
-          # ========================================================
-          # DIAGNOSTIC ONLY
-          # ========================================================
 
           if (
               $env:CATEGORY_INPUT -eq
               'Diagnostic_Test'
           ) {
-
-              $ralExpression =
-                  Convert-ToEcuTestPathExpression `
-                      -Path $env:RAL_FILE_LOCATION
-
+              $value =
+                  Convert-ToExpressionPath `
+                      $env:RAL_FILE_LOCATION
 
               $constants += [ordered]@{
-
-                  label =
-                      'PROJECT_GENERATOR_RAL_FILE_PATH'
-
-                  value =
-                      $ralExpression
+                  label = 'PROJECT_GENERATOR_RAL_FILE_PATH'
+                  value = $value
               }
-
 
               $parameters += [ordered]@{
-
-                  label =
-                      'PROJECT_GENERATOR_RAL_FILE_PATH'
-
-                  defaultValue =
-                      $ralExpression
-
-                  required =
-                      $false
+                  label = 'PROJECT_GENERATOR_RAL_FILE_PATH'
+                  defaultValue = $value
+                  required = $false
               }
-
-
-              Write-Host (
-                  'Diagnostic RAL expression: ' +
-                  "$ralExpression"
-              )
           }
-
-
-          # ========================================================
-          # BOOTLOADER ONLY
-          # ========================================================
 
           if (
               $env:CATEGORY_INPUT -eq
               'Bootloader_Compliance_Test'
           ) {
-
-              $hexExpression =
-                  Convert-ToEcuTestPathExpression `
-                      -Path $env:FLASH_ARCHIVE_LOCATION
-
+              $value =
+                  Convert-ToExpressionPath `
+                      $env:FLASH_ARCHIVE_LOCATION
 
               $constants += [ordered]@{
-
-                  label =
-                      'PROJECT_GENERATOR_BL_COMPLIANCE_FILE_PATH'
-
-                  value =
-                      $hexExpression
+                  label = 'PROJECT_GENERATOR_BL_COMPLIANCE_FILE_PATH'
+                  value = $value
               }
-
 
               $parameters += [ordered]@{
-
-                  label =
-                      'PROJECT_GENERATOR_BL_COMPLIANCE_FILE_PATH'
-
-                  defaultValue =
-                      $hexExpression
-
-                  required =
-                      $false
+                  label = 'PROJECT_GENERATOR_BL_COMPLIANCE_FILE_PATH'
+                  defaultValue = $value
+                  required = $false
               }
-
-
-              Write-Host (
-                  'Bootloader HEX expression: ' +
-                  "$hexExpression"
-              )
           }
 
-
-          # ========================================================
-          # CREATE PLAYBOOK OBJECT
-          # ========================================================
-
           $playbook = [ordered]@{
-
               metadata = [ordered]@{
-
                   name = (
                       "$env:PLAYBOOK_NAME-" +
                       "$env:JIRA_KEY-" +
@@ -893,138 +625,71 @@ jobs:
                       @()
               }
 
-
               workspace = [ordered]@{
-
                   source = [ordered]@{
-
-                      path =
-                          $env:TESTGUIDE_WORKSPACE
-
-                      sourceType =
-                          'location'
+                      path = $env:TESTGUIDE_WORKSPACE
+                      sourceType = 'location'
                   }
 
                   dependencies =
                       @()
               }
 
-
               setup = [ordered]@{
-
                   steps = @(
-
-                      # --------------------------------------------
-                      # START ECU-TEST
-                      # --------------------------------------------
-
                       [ordered]@{
-
-                          reuse =
-                              'always'
-
-                          keepConfiguration =
-                              $false
-
-                          waitMinutesForLicense =
-                              0
-
-                          stepName =
-                              "ecu.test $env:RESOURCE_NAME Start"
-
-                          type =
-                              'ecuTestStart'
+                          reuse = 'always'
+                          keepConfiguration = $false
+                          waitMinutesForLicense = 0
+                          stepName = "ecu.test $env:RESOURCE_NAME Start"
+                          type = 'ecuTestStart'
                       },
 
-
-                      # --------------------------------------------
-                      # LOAD TBC + TCF
-                      # --------------------------------------------
-
                       [ordered]@{
-
-                          tbcPath =
-                              $env:TBC_RELATIVE_PATH
-
-                          tcfPath =
-                              $env:TCF_RELATIVE_PATH
-
-                          stepName =
-                              'Test Configuration Selection'
-
-                          type =
-                              'configuration'
+                          tbcPath = $env:TBC_RELATIVE_PATH
+                          tcfPath = $env:TCF_RELATIVE_PATH
+                          stepName = 'Test Configuration Selection'
+                          type = 'configuration'
                       }
                   )
               }
-
 
               execution = [ordered]@{
-
                   testcases = @(
-
                       [ordered]@{
-
-                          # IMPORTANT:
-                          # Plain path. No quotes added here.
-                          relativePath =
-                              $env:PROJECT_RELATIVE_PATH
-
-                          constants =
-                              $constants
-
-                          stepName =
-                              "ecu.test $env:RESOURCE_NAME Start"
-
-                          type =
-                              'project'
+                          relativePath = $env:PROJECT_RELATIVE_PATH
+                          constants = $constants
+                          stepName = "ecu.test $env:RESOURCE_NAME Start"
+                          type = 'project'
                       }
                   )
               }
-
 
               teardown = [ordered]@{
-
                   steps = @(
-
                       [ordered]@{
-
-                          type =
-                              'ecuTestStop'
+                          type = 'ecuTestStop'
                       }
                   )
               }
 
-
               xilConfigRequirements = @(
-
                   [ordered]@{
-
-                      label =
-                          'Identifier'
-
-                      category =
-                          'XIL'
-
-                      value =
-                          $env:XIL_IDENTIFIER
-
-                      type =
-                          'configuration'
+                      label = 'Identifier'
+                      category = 'XIL'
+                      value = $env:XIL_IDENTIFIER
+                      type = 'configuration'
                   }
               )
-
 
               parameters =
                   $parameters
           }
 
-
           $playbookFile =
               Join-Path `
                   $env:ARTIFACT_ROOT `
                   'playbook.json'
-
 
           $playbook |
               ConvertTo-Json -Depth 30 |
@@ -1032,118 +697,55 @@ jobs:
                   -LiteralPath $playbookFile `
                   -Encoding utf8
 
-
-          # ========================================================
-          # VALIDATE GENERATED PROJECT PATH
-          # ========================================================
-
-          $validation =
-              Get-Content `
-                  -LiteralPath $playbookFile `
-                  -Raw |
-              ConvertFrom-Json
-
-
-          $generatedProject =
-              "$($validation.execution.testcases[0].relativePath)"
-
-
-          if ($generatedProject.Contains('"')) {
-
-              throw (
-                  'Generated project path contains ' +
-                  "an illegal quote: $generatedProject"
-              )
-          }
-
-
           "PLAYBOOK_FILE=$playbookFile" |
               Out-File `
                   -FilePath $env:GITHUB_ENV `
                   -Append `
                   -Encoding utf8
 
-
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'PLAYBOOK GENERATED'
-          Write-Host '========================================'
-          Write-Host "Name    : $($playbook.metadata.name)"
-          Write-Host "Project : [$generatedProject]"
-          Write-Host "File    : $playbookFile"
-          Write-Host '========================================'
-
-
       # ============================================================
-      # 6. CREATE TESTGUIDE PLAYBOOK
+      # 5. CREATE PLAYBOOK
       # ============================================================
 
       - name: Create TestGuide playbook
         shell: pwsh
-
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
 
         run: |
           $ErrorActionPreference = 'Stop'
 
-
           if (-not $env:ONECX_AUTH_KEY) {
               throw 'ONECX_AUTH_KEY is missing.'
           }
 
-
-          $headers = @{
-
-              'TestGuide-AuthKey' =
-                  $env:ONECX_AUTH_KEY
-
-              Accept =
-                  'application/json'
+          if (-not $env:ONECX_PROJECT_ID) {
+              throw 'ONECX_PROJECT_ID is missing.'
           }
 
+          $headers = @{
+              'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
+              Accept = 'application/json'
+          }
 
-          $createUrl = (
+          $url = (
               "$env:ONECX_URL/api/v2/execution/playbook" +
               "?projectId=$env:ONECX_PROJECT_ID" +
               "&folder=%2F"
           )
 
-
-          $body =
-              Get-Content `
-                  -LiteralPath $env:PLAYBOOK_FILE `
-                  -Raw
-
-
-          try {
-
-              $response =
-                  Invoke-RestMethod `
-                      -Method Post `
-                      -Uri $createUrl `
-                      -Headers $headers `
-                      -ContentType 'application/json' `
-                      -Body $body `
-                      -ErrorAction Stop
-          }
-          catch {
-
-              Write-Host 'Create playbook failed.'
-              Write-Host $_.Exception.Message
-
-
-              if ($_.ErrorDetails) {
-
-                  Write-Host (
-                      $_.ErrorDetails.Message
-                  )
-              }
-
-
-              throw
-          }
-
+          $response =
+              Invoke-RestMethod `
+                  -Method Post `
+                  -Uri $url `
+                  -Headers $headers `
+                  -ContentType 'application/json' `
+                  -Body (
+                      Get-Content `
+                          $env:PLAYBOOK_FILE `
+                          -Raw
+                  ) `
+                  -ErrorAction Stop
 
           $response |
               ConvertTo-Json -Depth 30 |
@@ -1155,214 +757,119 @@ jobs:
                   ) `
                   -Encoding utf8
 
-
-          $playbookId =
+          $id =
               $null
 
-
           if ($response.playbookId) {
-
-              $playbookId =
-                  $response.playbookId
+              $id = $response.playbookId
           }
           elseif ($response.id) {
-
-              $playbookId =
-                  $response.id
+              $id = $response.id
           }
           elseif ($response.data) {
-
-              $playbookId =
-                  $response.data.id
+              $id = $response.data.id
           }
 
-
-          if (-not $playbookId) {
-
-              throw (
-                  'TestGuide Create API returned ' +
-                  'no playbook ID.'
-              )
+          if (-not $id) {
+              throw 'Create API returned no playbook ID.'
           }
 
-
-          "TESTGUIDE_PLAYBOOK_ID=$playbookId" |
+          "TESTGUIDE_PLAYBOOK_ID=$id" |
               Out-File `
                   -FilePath $env:GITHUB_ENV `
                   -Append `
                   -Encoding utf8
 
-
-          Write-Host "Playbook ID: $playbookId"
-
+          Write-Host "Playbook ID: $id"
 
       # ============================================================
-      # 7. EXECUTE ONLY THE SELECTED PLAYBOOK
+      # 6. EXECUTE PLAYBOOK
       # ============================================================
 
       - name: Execute selected TestGuide playbook
         shell: pwsh
-
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
 
         run: |
           $ErrorActionPreference = 'Stop'
 
-
-          function Convert-ToEcuTestPathExpression {
-
-              param(
-                  [Parameter(Mandatory = $true)]
-                  [string]$Path
-              )
-
+          function Convert-ToExpressionPath {
+              param([string]$Path)
 
               $clean =
-                  $Path.Trim()
-
-
-              while (
-                  $clean.Length -ge 2 -and
-                  $clean.StartsWith('"') -and
-                  $clean.EndsWith('"')
-              ) {
-
-                  $clean =
-                      $clean.Substring(
-                          1,
-                          $clean.Length - 2
-                      ).Trim()
-              }
-
-
-              $escaped =
-                  $clean.Replace(
-                      '\',
-                      '\\'
-                  )
-
+                  $Path.Trim().Trim('"')
 
               return (
                   '"' +
-                  $escaped +
+                  $clean.Replace('\', '\\') +
                   '"'
               )
           }
 
-
-          $headers = @{
-
-              'TestGuide-AuthKey' =
-                  $env:ONECX_AUTH_KEY
-
-              Accept =
-                  'application/json'
-          }
-
-
-          $targetEcuExpression = (
-              "'" +
-              $env:TARGET_ECU +
-              "'"
-          )
-
-
-          $executionParameters = @(
-
+          $parameters = @(
               [ordered]@{
-
-                  label =
-                      'PROJECT_GENERATOR_TARGETECU'
-
-                  value =
-                      $targetEcuExpression
+                  label = 'PROJECT_GENERATOR_TARGETECU'
+                  value = "'$($env:TARGET_ECU)'"
               },
 
               [ordered]@{
-
-                  label =
-                      'PROJECT_GENERATOR_CT'
-
-                  value =
-                      'True'
+                  label = 'PROJECT_GENERATOR_CT'
+                  value = 'True'
               }
           )
 
-
-          # DIAGNOSTIC ONLY
           if (
               $env:CATEGORY_INPUT -eq
               'Diagnostic_Test'
           ) {
-
-              $executionParameters += [ordered]@{
-
-                  label =
-                      'PROJECT_GENERATOR_RAL_FILE_PATH'
-
+              $parameters += [ordered]@{
+                  label = 'PROJECT_GENERATOR_RAL_FILE_PATH'
                   value = (
-                      Convert-ToEcuTestPathExpression `
-                          -Path $env:RAL_FILE_LOCATION
+                      Convert-ToExpressionPath `
+                          $env:RAL_FILE_LOCATION
                   )
               }
           }
 
-
-          # BOOTLOADER ONLY
           if (
               $env:CATEGORY_INPUT -eq
               'Bootloader_Compliance_Test'
           ) {
-
-              $executionParameters += [ordered]@{
-
-                  label =
-                      'PROJECT_GENERATOR_BL_COMPLIANCE_FILE_PATH'
-
+              $parameters += [ordered]@{
+                  label = 'PROJECT_GENERATOR_BL_COMPLIANCE_FILE_PATH'
                   value = (
-                      Convert-ToEcuTestPathExpression `
-                          -Path $env:FLASH_ARCHIVE_LOCATION
+                      Convert-ToExpressionPath `
+                          $env:FLASH_ARCHIVE_LOCATION
                   )
               }
           }
 
+          $headers = @{
+              'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
+              Accept = 'application/json'
+          }
 
-          $executeUrl = (
+          $url = (
               "$env:ONECX_URL/api/v2/execution/playbook/" +
               "$env:TESTGUIDE_PLAYBOOK_ID/execute" +
               "?projectId=$env:ONECX_PROJECT_ID" +
               "&checkLastExecution=true"
           )
 
-
-          $requestBody = @{
-
-              parameters =
-                  $executionParameters
+          $body = @{
+              parameters = $parameters
           } |
               ConvertTo-Json -Depth 20
-
-
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'EXECUTE SELECTED PLAYBOOK'
-          Write-Host '========================================'
-          Write-Host "Category : $env:CATEGORY_INPUT"
-          Write-Host "Playbook : $env:TESTGUIDE_PLAYBOOK_ID"
-          Write-Host "Project  : [$env:PROJECT_RELATIVE_PATH]"
-          Write-Host '========================================'
-
 
           $response =
               Invoke-RestMethod `
                   -Method Post `
-                  -Uri $executeUrl `
+                  -Uri $url `
                   -Headers $headers `
                   -ContentType 'application/json' `
-                  -Body $requestBody `
+                  -Body $body `
                   -ErrorAction Stop
-
 
           $response |
               ConvertTo-Json -Depth 30 |
@@ -1374,63 +881,34 @@ jobs:
                   ) `
                   -Encoding utf8
 
-
-          Write-Host (
-              $response |
-                  ConvertTo-Json -Depth 30
-          )
-
-
-          # Confirmed response:
-          # {
-          #   "taskIds": [14404]
-          # }
-
           $taskId =
               $null
 
-
           if ($response.taskIds) {
-
-              $taskId =
-                  @($response.taskIds)[0]
+              $taskId = @($response.taskIds)[0]
           }
           elseif ($response.taskId) {
-
-              $taskId =
-                  $response.taskId
+              $taskId = $response.taskId
           }
           elseif ($response.id) {
-
-              $taskId =
-                  $response.id
+              $taskId = $response.id
           }
           elseif (
               $response.data -and
               $response.data.taskIds
           ) {
-
-              $taskId =
-                  @($response.data.taskIds)[0]
+              $taskId = @($response.data.taskIds)[0]
           }
           elseif (
               $response.data -and
               $response.data.taskId
           ) {
-
-              $taskId =
-                  $response.data.taskId
+              $taskId = $response.data.taskId
           }
-
 
           if (-not $taskId) {
-
-              throw (
-                  'TestGuide Execute API returned ' +
-                  'no task ID.'
-              )
+              throw 'Execute API returned no task ID.'
           }
-
 
           "TESTGUIDE_TASK_ID=$taskId" |
               Out-File `
@@ -1438,35 +916,26 @@ jobs:
                   -Append `
                   -Encoding utf8
 
-
           Write-Host "Task ID: $taskId"
 
-
       # ============================================================
-      # 8. POLL EVERY 15 SECONDS UNTIL TERMINAL STATE
+      # 7. POLL EVERY 15 SECONDS UNTIL ANY TERMINAL STATE
       # ============================================================
 
-      - name: Wait for TestGuide execution
+      - name: Wait for TestGuide terminal state
         shell: pwsh
-
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
 
         run: |
           $ErrorActionPreference = 'Stop'
 
-
           $headers = @{
-
-              'TestGuide-AuthKey' =
-                  $env:ONECX_AUTH_KEY
-
-              Accept =
-                  'application/json'
+              'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
+              Accept = 'application/json'
           }
 
-
-          $taskUrl = (
+          $url = (
               "$env:ONECX_URL/api/v2/execution/task/" +
               "$env:TESTGUIDE_TASK_ID" +
               "?projectId=$env:ONECX_PROJECT_ID" +
@@ -1479,84 +948,134 @@ jobs:
               "&fields=abortedByUser"
           )
 
+          $completeStates = @(
+              'FINISHED',
+              'COMPLETED',
+              'COMPLETE',
+              'SUCCESS',
+              'SUCCEEDED',
+              'DONE'
+          )
 
-          Write-Host ''
-          Write-Host 'Polling every 15 seconds...'
+          $abortStates = @(
+              'ABORTED',
+              'ABORT'
+          )
 
+          $failureStates = @(
+              'ERROR',
+              'FAILED',
+              'FAILURE'
+          )
 
-          while ($true) {
+          $cancelStates = @(
+              'CANCELLED',
+              'CANCELED'
+          )
 
+          $deadline =
+              (Get-Date).AddMinutes(180)
+
+          while (
+              (Get-Date) -lt
+              $deadline
+          ) {
               $task =
                   Invoke-RestMethod `
                       -Method Get `
-                      -Uri $taskUrl `
+                      -Uri $url `
                       -Headers $headers `
                       -ErrorAction Stop
-
 
               $state =
                   "$($task.state)".
                       Trim().
                       ToUpperInvariant()
 
-
               $verdict =
                   "$($task.aggregatedVerdict)".
                       Trim()
-
 
               $stateInfo =
                   "$($task.stateInfo)".
                       Trim()
 
+              $startDate =
+                  "$($task.startDate)".
+                      Trim()
+
+              $endDate =
+                  "$($task.endDate)".
+                      Trim()
 
               $abortedBy =
                   "$($task.abortedByUser)".
                       Trim()
 
-
               Write-Host (
                   "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') " +
                   "Task=$env:TESTGUIDE_TASK_ID " +
-                  "State=$state " +
-                  "Verdict=$verdict"
+                  "State=[$state] " +
+                  "Verdict=[$verdict] " +
+                  "EndDate=[$endDate]"
               )
 
+              $task |
+                  ConvertTo-Json -Depth 30 |
+                  Set-Content `
+                      -LiteralPath (
+                          Join-Path `
+                              $env:ARTIFACT_ROOT `
+                              'task-latest.json'
+                      ) `
+                      -Encoding utf8
 
-              # ====================================================
-              # NORMAL COMPLETE
-              # ====================================================
+              $terminal =
+                  ($state -in $completeStates) -or
+                  ($state -in $abortStates) -or
+                  ($state -in $failureStates) -or
+                  ($state -in $cancelStates)
 
+              # If TestGuide returns an unexpected final state but
+              # endDate is populated, the execution has ended.
               if (
-                  $state -in @(
-                      'FINISHED',
-                      'COMPLETED',
-                      'COMPLETE',
-                      'SUCCESS',
-                      'SUCCEEDED'
-                  )
+                  -not $terminal -and
+                  $endDate
               ) {
+                  Write-Warning (
+                      "Task has endDate but returned " +
+                      "unrecognized state '$state'. " +
+                      'Treating the task as complete.'
+                  )
 
-                  "TASK_START_DATE=$($task.startDate)" |
+                  $terminal = $true
+              }
+
+              if ($terminal) {
+                  $safeInfo =
+                      (
+                          $stateInfo -replace
+                          '[\r\n]+',
+                          ' '
+                      ).Trim()
+
+                  "TASK_START_DATE=$startDate" |
                       Out-File `
                           -FilePath $env:GITHUB_ENV `
                           -Append `
                           -Encoding utf8
 
-
-                  "TASK_END_DATE=$($task.endDate)" |
+                  "TASK_END_DATE=$endDate" |
                       Out-File `
                           -FilePath $env:GITHUB_ENV `
                           -Append `
                           -Encoding utf8
-
 
                   "TESTGUIDE_STATE=$state" |
                       Out-File `
                           -FilePath $env:GITHUB_ENV `
                           -Append `
                           -Encoding utf8
-
 
                   "TESTGUIDE_VERDICT=$verdict" |
                       Out-File `
@@ -1564,6 +1083,11 @@ jobs:
                           -Append `
                           -Encoding utf8
 
+                  "TESTGUIDE_MESSAGE=$safeInfo" |
+                      Out-File `
+                          -FilePath $env:GITHUB_ENV `
+                          -Append `
+                          -Encoding utf8
 
                   $task |
                       ConvertTo-Json -Depth 30 |
@@ -1575,72 +1099,56 @@ jobs:
                           ) `
                           -Encoding utf8
 
+                  # Normal completion or an unknown state with an
+                  # endDate continues to ATX download.
+                  if (
+                      ($state -in $completeStates) -or
+                      (
+                          $endDate -and
+                          $state -notin $abortStates -and
+                          $state -notin $failureStates -and
+                          $state -notin $cancelStates
+                      )
+                  ) {
+                      Write-Host (
+                          "Execution ended. State=$state. " +
+                          'Moving to ATX download.'
+                      )
 
-                  Write-Host (
-                      "Task completed. " +
-                      'Moving to ATX download.'
-                  )
-
-
-                  exit 0
-              }
-
-
-              # ====================================================
-              # ABORTED
-              # ====================================================
-
-              if ($state -eq 'ABORTED') {
-
-                  if (-not $stateInfo) {
-
-                      $stateInfo =
-                          'TestGuide task was aborted.'
+                      exit 0
                   }
 
+                  # Aborted/failed/cancelled: stop polling and fail,
+                  # while preserving the exact TestGuide message.
+                  if (-not $safeInfo) {
+                      if ($state -in $abortStates) {
+                          $safeInfo =
+                              'TestGuide execution was aborted.'
+                      }
+                      elseif ($state -in $cancelStates) {
+                          $safeInfo =
+                              'TestGuide execution was cancelled.'
+                      }
+                      else {
+                          $safeInfo =
+                              'TestGuide returned no failure message.'
+                      }
+                  }
 
                   $message = (
-                      'TestGuide execution ABORTED. ' +
+                      "TestGuide execution ended. " +
+                      "State=$state; " +
                       "Task=$env:TESTGUIDE_TASK_ID; " +
-                      "Playbook=$env:TESTGUIDE_PLAYBOOK_ID; " +
-                      "Project=$env:PROJECT_RELATIVE_PATH; " +
-                      "Message=$stateInfo"
+                      "Verdict=$verdict; " +
+                      "Message=$safeInfo"
                   )
 
-
                   if ($abortedBy) {
-
                       $message += (
                           "; AbortedBy=$abortedBy"
                       )
                   }
 
-
-                  "TESTGUIDE_STATE=ABORTED" |
-                      Out-File `
-                          -FilePath $env:GITHUB_ENV `
-                          -Append `
-                          -Encoding utf8
-
-
-                  "TESTGUIDE_MESSAGE=$stateInfo" |
-                      Out-File `
-                          -FilePath $env:GITHUB_ENV `
-                          -Append `
-                          -Encoding utf8
-
-
-                  $task |
-                      ConvertTo-Json -Depth 30 |
-                      Set-Content `
-                          -LiteralPath (
-                              Join-Path `
-                                  $env:ARTIFACT_ROOT `
-                                  'task-result.json'
-                          ) `
-                          -Encoding utf8
-
-
                   $message |
                       Set-Content `
                           -LiteralPath (
@@ -1650,374 +1158,165 @@ jobs:
                           ) `
                           -Encoding utf8
 
-
                   throw $message
               }
-
-
-              # ====================================================
-              # FAILED / ERROR
-              # ====================================================
-
-              if (
-                  $state -in @(
-                      'ERROR',
-                      'FAILED',
-                      'FAILURE'
-                  )
-              ) {
-
-                  if (-not $stateInfo) {
-
-                      $stateInfo =
-                          'TestGuide returned no failure message.'
-                  }
-
-
-                  $message = (
-                      'TestGuide execution FAILED. ' +
-                      "State=$state; " +
-                      "Task=$env:TESTGUIDE_TASK_ID; " +
-                      "Playbook=$env:TESTGUIDE_PLAYBOOK_ID; " +
-                      "Project=$env:PROJECT_RELATIVE_PATH; " +
-                      "Verdict=$verdict; " +
-                      "Message=$stateInfo"
-                  )
-
-
-                  "TESTGUIDE_STATE=$state" |
-                      Out-File `
-                          -FilePath $env:GITHUB_ENV `
-                          -Append `
-                          -Encoding utf8
-
-
-                  "TESTGUIDE_MESSAGE=$stateInfo" |
-                      Out-File `
-                          -FilePath $env:GITHUB_ENV `
-                          -Append `
-                          -Encoding utf8
-
-
-                  $task |
-                      ConvertTo-Json -Depth 30 |
-                      Set-Content `
-                          -LiteralPath (
-                              Join-Path `
-                                  $env:ARTIFACT_ROOT `
-                                  'task-result.json'
-                          ) `
-                          -Encoding utf8
-
-
-                  $message |
-                      Set-Content `
-                          -LiteralPath (
-                              Join-Path `
-                                  $env:ARTIFACT_ROOT `
-                                  'testguide-error.txt'
-                          ) `
-                          -Encoding utf8
-
-
-                  throw $message
-              }
-
-
-              # ====================================================
-              # CANCELLED
-              # ====================================================
-
-              if (
-                  $state -in @(
-                      'CANCELLED',
-                      'CANCELED'
-                  )
-              ) {
-
-                  if (-not $stateInfo) {
-
-                      $stateInfo =
-                          'TestGuide task was cancelled.'
-                  }
-
-
-                  $message = (
-                      'TestGuide execution CANCELLED. ' +
-                      "Task=$env:TESTGUIDE_TASK_ID; " +
-                      "Project=$env:PROJECT_RELATIVE_PATH; " +
-                      "Message=$stateInfo"
-                  )
-
-
-                  "TESTGUIDE_STATE=CANCELLED" |
-                      Out-File `
-                          -FilePath $env:GITHUB_ENV `
-                          -Append `
-                          -Encoding utf8
-
-
-                  "TESTGUIDE_MESSAGE=$stateInfo" |
-                      Out-File `
-                          -FilePath $env:GITHUB_ENV `
-                          -Append `
-                          -Encoding utf8
-
-
-                  $message |
-                      Set-Content `
-                          -LiteralPath (
-                              Join-Path `
-                                  $env:ARTIFACT_ROOT `
-                                  'testguide-error.txt'
-                          ) `
-                          -Encoding utf8
-
-
-                  throw $message
-              }
-
-
-              # ====================================================
-              # RUNNING / QUEUED / BLOCKED / OTHER
-              # ====================================================
 
               Write-Host (
-                  "Task not complete. " +
-                  "State=$state. " +
+                  "Task is still active. State=$state. " +
                   'Polling again in 15 seconds...'
               )
-
 
               Start-Sleep -Seconds 15
           }
 
+          throw (
+              'Polling exceeded 180 minutes. ' +
+              "Task=$env:TESTGUIDE_TASK_ID"
+          )
 
       # ============================================================
-      # 9. DOWNLOAD ATX
-      # Runs only after successful terminal completion.
+      # 8. DOWNLOAD ATX AFTER COMPLETION
       # ============================================================
 
       - name: Download ATX report
         shell: pwsh
-
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
 
         run: |
           $ErrorActionPreference = 'Stop'
 
-
           $headers = @{
-
-              'TestGuide-AuthKey' =
-                  $env:ONECX_AUTH_KEY
-
-              Accept =
-                  'application/json'
+              'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
+              Accept = 'application/json'
           }
-
-
-          $url = (
-              "$env:ONECX_URL/api/artifact/depositories" +
-              "?projectId=$env:ONECX_PROJECT_ID" +
-              "&shared=false"
-          )
-
 
           $response =
               Invoke-RestMethod `
-                  -Method Get `
-                  -Uri $url `
+                  -Uri (
+                      "$env:ONECX_URL/api/artifact/depositories" +
+                      "?projectId=$env:ONECX_PROJECT_ID" +
+                      "&shared=false"
+                  ) `
                   -Headers $headers `
                   -ErrorAction Stop
 
-
           if ($response.items) {
-
-              $depositories =
-                  @($response.items)
+              $depositories = @($response.items)
           }
           else {
-
-              $depositories =
-                  @($response)
+              $depositories = @($response)
           }
 
-
-          $start =
-              Get-Date `
-                  $env:TASK_START_DATE
-
-
-          $end =
-              Get-Date `
-                  $env:TASK_END_DATE
-
-
           $from =
-              $start.
+              (
+                  Get-Date $env:TASK_START_DATE
+              ).
                   AddMinutes(-2).
                   ToUniversalTime().
                   ToString(
                       'yyyy-MM-ddTHH:mm:ss.fffZ'
                   )
 
-
           $to =
-              $end.
+              (
+                  Get-Date $env:TASK_END_DATE
+              ).
                   AddMinutes(15).
                   ToUniversalTime().
                   ToString(
                       'yyyy-MM-ddTHH:mm:ss.fffZ'
                   )
 
+          $count = 0
 
-          $count =
-              0
+          foreach ($depository in $depositories) {
+              $id = "$($depository.id)"
 
-
-          foreach (
-              $depository in
-              $depositories
-          ) {
-
-              $depositoryId =
-                  "$($depository.id)"
-
-
-              if (-not $depositoryId) {
-
+              if (-not $id) {
                   continue
               }
 
-
-              $artifactUrl = (
-                  "$env:ONECX_URL/api/artifact/artifacts" +
-                  "?depositoryId=$depositoryId" +
-                  "&startDate=$from" +
-                  "&endDate=$to"
-              )
-
-
               try {
-
                   $result =
                       Invoke-RestMethod `
-                          -Method Get `
-                          -Uri $artifactUrl `
+                          -Uri (
+                              "$env:ONECX_URL/api/artifact/artifacts" +
+                              "?depositoryId=$id" +
+                              "&startDate=$from" +
+                              "&endDate=$to"
+                          ) `
                           -Headers $headers `
                           -ErrorAction Stop
               }
               catch {
-
                   continue
               }
 
-
               if ($result.items) {
-
-                  $artifacts =
-                      @($result.items)
+                  $artifacts = @($result.items)
               }
               else {
-
-                  $artifacts =
-                      @($result)
+                  $artifacts = @($result)
               }
 
-
               foreach ($artifact in $artifacts) {
-
-                  $fileName =
-                      "$($artifact.fileName)"
-
+                  $name = "$($artifact.fileName)"
 
                   $extension =
                       "$($artifact.extension)".
                           TrimStart('.').
                           ToLowerInvariant()
 
-
                   if (
-                      ($extension -ne 'atx') -and
-                      ($fileName -notmatch '(?i)\.atx$')
+                      $extension -ne 'atx' -and
+                      $name -notmatch '(?i)\.atx$'
                   ) {
-
                       continue
                   }
 
-
-                  $artifactId =
-                      "$($artifact.id)"
-
+                  $artifactId = "$($artifact.id)"
 
                   if (-not $artifactId) {
-
                       continue
                   }
 
-
-                  if (-not $fileName) {
-
-                      $fileName =
-                          "$artifactId.atx"
+                  if (-not $name) {
+                      $name = "$artifactId.atx"
                   }
 
-
-                  $downloadUrl = (
-                      "$env:ONECX_URL/api/artifact/artifacts/" +
-                      "$artifactId/download"
-                  )
-
-
-                  $destination =
+                  $output =
                       Join-Path `
                           $env:ATX_DIRECTORY `
-                          $fileName
-
+                          $name
 
                   Invoke-WebRequest `
-                      -Method Get `
-                      -Uri $downloadUrl `
+                      -Uri (
+                          "$env:ONECX_URL/api/artifact/artifacts/" +
+                          "$artifactId/download"
+                      ) `
                       -Headers $headers `
-                      -OutFile $destination `
+                      -OutFile $output `
                       -ErrorAction Stop
 
-
                   if (
-                      (
-                          Get-Item `
-                              -LiteralPath $destination
-                      ).Length -eq 0
+                      (Get-Item $output).Length -eq 0
                   ) {
-
-                      throw (
-                          "Downloaded ATX is empty: " +
-                          "$fileName"
-                      )
+                      throw "Downloaded ATX is empty: $name"
                   }
 
-
-                  Write-Host "Downloaded ATX: $fileName"
-
+                  Write-Host "Downloaded ATX: $name"
 
                   $count++
               }
           }
 
-
           if ($count -eq 0) {
-
-              throw (
-                  'No ATX report was found for ' +
-                  'the current execution.'
-              )
+              throw 'No ATX report was found.'
           }
 
-
       # ============================================================
-      # 10. BUILD JFROG PATH
+      # 9. BUILD JFROG PATH
       # ============================================================
 
       - name: Build JFrog destination
@@ -2025,7 +1324,6 @@ jobs:
 
         run: |
           $ErrorActionPreference = 'Stop'
-
 
           $segments = @(
               $env:CW_RELEASE
@@ -2035,14 +1333,11 @@ jobs:
               $env:RUN_TIMESTAMP
           )
 
-
           foreach ($segment in $segments) {
-
               if (
                   $segment -notmatch
                   '^[A-Za-z0-9._-]+$'
               ) {
-
                   throw (
                       "Unsafe JFrog path segment: " +
                       "$segment"
@@ -2050,34 +1345,26 @@ jobs:
               }
           }
 
-
-          $targetPath = (
+          $path = (
               'L2_Quality_Gate/' +
               ($segments -join '/') +
               '/'
           )
 
-
-          "JFROG_TARGET_PATH=$targetPath" |
+          "JFROG_TARGET_PATH=$path" |
               Out-File `
                   -FilePath $env:GITHUB_ENV `
                   -Append `
                   -Encoding utf8
 
-
-          Write-Host (
-              "JFrog target: " +
-              "$targetPath"
-          )
-
+          Write-Host "JFrog target: $path"
 
       # ============================================================
-      # 11. UPLOAD ATX TO JFROG
+      # 10. UPLOAD ATX TO JFROG
       # ============================================================
 
       - name: Upload ATX to JFrog
         shell: pwsh
-
         env:
           JFROG_USER: ${{ secrets.JFROG_USER }}
           JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
@@ -2085,44 +1372,29 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-
           if (-not $env:JFROG_TOKEN) {
-
               throw 'JFROG_TOKEN is missing.'
           }
 
-
           $files =
               Get-ChildItem `
-                  -LiteralPath $env:ATX_DIRECTORY `
+                  $env:ATX_DIRECTORY `
                   -Filter '*.atx' `
                   -File
 
-
           if (-not $files) {
-
-              throw 'No ATX report to upload.'
+              throw 'No ATX report is available to upload.'
           }
 
-
           foreach ($file in $files) {
-
-              $uploadUrl = (
+              $url = (
                   "$($env:JFROG_URL.TrimEnd('/'))/" +
                   "$env:JFROG_REPOSITORY/" +
                   "$env:JFROG_TARGET_PATH" +
                   "$($file.Name)"
               )
 
-
-              Write-Host (
-                  "Uploading to JFrog: " +
-                  "$($file.Name)"
-              )
-
-
               if ($env:JFROG_USER) {
-
                   curl.exe `
                       --fail-with-body `
                       --silent `
@@ -2131,10 +1403,9 @@ jobs:
                       --user "$($env:JFROG_USER):$($env:JFROG_TOKEN)" `
                       --header 'Content-Type: application/octet-stream' `
                       --upload-file "$($file.FullName)" `
-                      "$uploadUrl"
+                      "$url"
               }
               else {
-
                   curl.exe `
                       --fail-with-body `
                       --silent `
@@ -2143,19 +1414,13 @@ jobs:
                       --header "Authorization: Bearer $env:JFROG_TOKEN" `
                       --header 'Content-Type: application/octet-stream' `
                       --upload-file "$($file.FullName)" `
-                      "$uploadUrl"
+                      "$url"
               }
-
 
               if ($LASTEXITCODE -ne 0) {
-
-                  throw (
-                      'JFrog upload failed for ' +
-                      "$($file.Name)"
-                  )
+                  throw "JFrog upload failed: $($file.Name)"
               }
           }
-
 
           $jfrogUrl = (
               "$($env:JFROG_URL.TrimEnd('/'))/" +
@@ -2163,140 +1428,88 @@ jobs:
               "$env:JFROG_TARGET_PATH"
           )
 
-
           "JFROG_REPORT_URL=$jfrogUrl" |
               Out-File `
                   -FilePath $env:GITHUB_ENV `
                   -Append `
                   -Encoding utf8
 
-
       # ============================================================
-      # 12. GITHUB ARTIFACTS
+      # 11. UPLOAD PIPELINE ARTIFACTS
       # ============================================================
 
       - name: Upload pipeline artifacts
         if: always()
-
         uses: actions/upload-artifact@v4
-
         with:
           name: l2-${{ github.event.client_payload.jira_key }}-${{ github.run_id }}
           path: ${{ env.ARTIFACT_ROOT }}
           if-no-files-found: warn
           retention-days: 30
 
-
       # ============================================================
-      # 13. COMMENT ON JIRA
+      # 12. COMMENT RESULT ON JIRA
       # ============================================================
 
       - name: Comment result on Jira
         if: always()
-
         continue-on-error: true
-
         shell: pwsh
-
         env:
           JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
 
         run: |
           if (
-              (-not $env:JIRA_KEY) -or
-              (-not $env:JIRA_EMAIL) -or
-              (-not $env:JIRA_API_TOKEN)
+              -not $env:JIRA_KEY -or
+              -not $env:JIRA_EMAIL -or
+              -not $env:JIRA_API_TOKEN
           ) {
-
-              Write-Warning (
-                  'Jira credentials unavailable. ' +
-                  'Skipping comment.'
-              )
-
               exit 0
           }
 
-
-          if (
-              '${{ job.status }}' -eq
-              'success'
-          ) {
-
-              $result =
-                  'COMPLETED'
+          if ('${{ job.status }}' -eq 'success') {
+              $result = 'COMPLETED'
+          }
+          elseif ($env:TESTGUIDE_STATE) {
+              $result = $env:TESTGUIDE_STATE
           }
           else {
-
-              $result =
-                  'FAILED'
-
-              if ($env:TESTGUIDE_STATE) {
-
-                  $result =
-                      $env:TESTGUIDE_STATE
-              }
+              $result = 'FAILED'
           }
 
-
-          $githubRunUrl =
+          $runUrl =
               'https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'
-
 
           $text = (
               "L2 Quality Gate $result`n`n" +
               "Category: $env:CATEGORY`n" +
               "Test/Validator: $env:TEST_OR_VALIDATOR`n" +
-              "CW Release: $env:CW_RELEASE`n" +
-              "Target ECU: $env:TARGET_ECU`n" +
-              "Test Bench: $env:TEST_BENCH`n" +
+              "CW: $env:CW_RELEASE`n" +
+              "ECU: $env:TARGET_ECU`n" +
+              "Bench: $env:TEST_BENCH`n" +
               "Project: $env:PROJECT_RELATIVE_PATH`n" +
               "Playbook ID: $env:TESTGUIDE_PLAYBOOK_ID`n" +
               "Task ID: $env:TESTGUIDE_TASK_ID`n" +
               "State: $env:TESTGUIDE_STATE`n" +
-              "Verdict: $env:TESTGUIDE_VERDICT"
+              "Verdict: $env:TESTGUIDE_VERDICT`n" +
+              "Message: $env:TESTGUIDE_MESSAGE`n`n" +
+              "GitHub: $runUrl`n" +
+              "JFrog: $env:JFROG_REPORT_URL"
           )
-
-
-          if ($env:TESTGUIDE_MESSAGE) {
-
-              $text += (
-                  "`nMessage: " +
-                  "$env:TESTGUIDE_MESSAGE"
-              )
-          }
-
-
-          $text += (
-              "`n`nGitHub Run:`n" +
-              "$githubRunUrl"
-          )
-
-
-          if ($env:JFROG_REPORT_URL) {
-
-              $text += (
-                  "`n`nJFrog Report:`n" +
-                  "$env:JFROG_REPORT_URL"
-              )
-          }
-
 
           $commentFile =
               Join-Path `
                   $env:RUNNER_TEMP `
                   'jira-comment.json'
 
-
           @{
-              body =
-                  $text
+              body = $text
           } |
               ConvertTo-Json |
               Set-Content `
-                  -LiteralPath $commentFile `
+                  $commentFile `
                   -Encoding utf8
-
 
           curl.exe `
               --fail-with-body `
@@ -2309,14 +1522,12 @@ jobs:
               --data-binary "@$commentFile" `
               "$env:JIRA_BASE_URL/rest/api/2/issue/$env:JIRA_KEY/comment"
 
-
       # ============================================================
-      # 14. SUMMARY
+      # 13. SUMMARY
       # ============================================================
 
       - name: Write workflow summary
         if: always()
-
         shell: pwsh
 
         run: |
@@ -2324,12 +1535,7 @@ jobs:
           ## L2 Quality Gate
 
           - Jira: $env:JIRA_KEY
-          - Selected category: $env:CATEGORY_INPUT
-          - Category: $env:CATEGORY
-          - Test/Validator: $env:TEST_OR_VALIDATOR
-          - CW Release: $env:CW_RELEASE
-          - Target ECU: $env:TARGET_ECU
-          - Test Bench: $env:TEST_BENCH
+          - Category: $env:CATEGORY_INPUT
           - Project: $env:PROJECT_RELATIVE_PATH
           - Playbook ID: $env:TESTGUIDE_PLAYBOOK_ID
           - Task ID: $env:TESTGUIDE_TASK_ID
@@ -2339,6 +1545,6 @@ jobs:
           - JFrog: $env:JFROG_REPORT_URL
           "@ |
               Out-File `
-                  -FilePath $env:GITHUB_STEP_SUMMARY `
+                  $env:GITHUB_STEP_SUMMARY `
                   -Append `
                   -Encoding utf8
