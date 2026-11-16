@@ -13,8 +13,12 @@ jobs:
       - name: Show Jira payload
         shell: bash
         run: |
+          echo "================================"
+          echo "JIRA DISPATCH RECEIVED"
+          echo "================================"
           echo "Jira: ${{ github.event.client_payload.jira_key }}"
-          echo "Labels: ${{ github.event.client_payload.labels }}"
+          echo "Category: ${{ github.event.client_payload.category }}"
           echo "CW: ${{ github.event.client_payload.cw_release }}"
           echo "Bench: ${{ github.event.client_payload.test_bench }}"
           echo "ECU: ${{ github.event.client_payload.target_ecu }}"
+          echo "================================"
