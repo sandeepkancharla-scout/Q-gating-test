@@ -1,0 +1,316 @@
+name: L2 Bootloader Compliance TestGuide Execution
+
+on:
+  workflow_dispatch:
+    inputs:
+      jira_key:
+        description: Jira issue key used for traceability
+        required: true
+        type: string
+      bench_id:
+        description: SYSHIL1 or SYSHIL2
+        required: true
+        type: choice
+        options:
+          - SYSHIL1
+          - SYSHIL2
+      target_ecu:
+        description: Target ECU, for example TSG_BSF
+        required: true
+        type: string
+      cw_release:
+        description: Calendar-week release, for example CW45
+        required: true
+        type: string
+      project_relative_path:
+        description: ECU-TEST project path relative to the TestGuide workspace
+        required: true
+        default: 'Packages\system-hil\L2_Quality_Gate\BOOTLOADER\BOOTLOADER_L2QualityGate.prj'
+        type: string
+      playbook_name:
+        description: TestGuide playbook name
+        required: true
+        default: 'L2 Bootloader Compliance'
+        type: string
+  repository_dispatch:
+    types:
+      - l2_bootloader_execution
+
+permissions:
+  contents: read
+
+env:
+  DOMAIN: 'bootloader-compliance'
+  JIRA_KEY: ${{ inputs.jira_key || github.event.client_payload.jira_key }}
+  BENCH_ID: ${{ inputs.bench_id || github.event.client_payload.bench_id }}
+  TARGET_ECU: ${{ inputs.target_ecu || github.event.client_payload.target_ecu }}
+  CW_RELEASE: ${{ inputs.cw_release || github.event.client_payload.cw_release }}
+  PROJECT_RELATIVE_PATH: ${{ inputs.project_relative_path || github.event.client_payload.project_relative_path }}
+  PLAYBOOK_NAME: ${{ inputs.playbook_name || github.event.client_payload.playbook_name }}
+  ONECX_URL: 'https://testguide-ssp.onecx.vwgroup.com'
+  ONECX_PROJECT_ID: ${{ vars.ONECX_PROJECT_ID }}
+  ONECX_CREATE_PLAYBOOK_URL: ${{ vars.ONECX_CREATE_PLAYBOOK_URL }}
+  ONECX_EXECUTE_PLAYBOOK_URL_TEMPLATE: ${{ vars.ONECX_EXECUTE_PLAYBOOK_URL_TEMPLATE }}
+  ONECX_TASK_URL_TEMPLATE: ${{ vars.ONECX_TASK_URL_TEMPLATE }}
+
+jobs:
+  execute:
+    name: Execute L2 Bootloader Compliance
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+    timeout-minutes: 180
+    concurrency:
+      group: l2-bootloader-compliance-${{ inputs.bench_id || github.event.client_payload.bench_id }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Validate request and API configuration
+        shell: pwsh
+        env:
+          ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $required = @{
+            JIRA_KEY = $env:JIRA_KEY
+            BENCH_ID = $env:BENCH_ID
+            TARGET_ECU = $env:TARGET_ECU
+            CW_RELEASE = $env:CW_RELEASE
+            PROJECT_RELATIVE_PATH = $env:PROJECT_RELATIVE_PATH
+            PLAYBOOK_NAME = $env:PLAYBOOK_NAME
+            ONECX_PROJECT_ID = $env:ONECX_PROJECT_ID
+            ONECX_AUTH_KEY = $env:ONECX_AUTH_KEY
+            ONECX_CREATE_PLAYBOOK_URL = $env:ONECX_CREATE_PLAYBOOK_URL
+            ONECX_EXECUTE_PLAYBOOK_URL_TEMPLATE = $env:ONECX_EXECUTE_PLAYBOOK_URL_TEMPLATE
+            ONECX_TASK_URL_TEMPLATE = $env:ONECX_TASK_URL_TEMPLATE
+          }
+
+          foreach ($item in $required.GetEnumerator()) {
+            if ([System.String]::IsNullOrWhiteSpace([string]$item.Value)) {
+              throw "Missing required value: $($item.Key)"
+            }
+          }
+
+          if ($env:BENCH_ID.ToUpperInvariant() -notin @('SYSHIL1', 'SYSHIL2')) {
+            throw "Unsupported BENCH_ID: $env:BENCH_ID"
+          }
+
+          if ($env:CW_RELEASE -notmatch '^CW[0-9]{2}$') {
+            throw "CW_RELEASE must use CWXX format. Received: $env:CW_RELEASE"
+          }
+
+          if (-not $env:ONECX_EXECUTE_PLAYBOOK_URL_TEMPLATE.Contains('{playbookId}')) {
+            throw 'ONECX_EXECUTE_PLAYBOOK_URL_TEMPLATE must contain {playbookId}.'
+          }
+
+          if (-not $env:ONECX_TASK_URL_TEMPLATE.Contains('{taskId}')) {
+            throw 'ONECX_TASK_URL_TEMPLATE must contain {taskId}.'
+          }
+
+      - name: Resolve TestGuide bench configuration
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bench = $env:BENCH_ID.Trim().ToUpperInvariant()
+
+          switch ($bench) {
+            'SYSHIL1' {
+              $resource = 'syshil1-labtest1'
+              $workspace = 'D:\HIL\Testing\eeint-Test-Automation'
+            }
+            'SYSHIL2' {
+              $resource = 'syshil2-labtest2'
+              $workspace = 'C:\HIL\Testing\eeint-Test-Automation'
+            }
+            default { throw "No TestGuide mapping exists for bench $bench." }
+          }
+
+          $identifier = "novi_hq/1stfloor/ee_lab_novi/$resource/ControlComputer"
+          $stepName = "ecu.test $resource Start"
+          $configurationFolder = 'SUBSYS1'
+
+          "RESOURCE_NAME=$resource" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TESTGUIDE_ROOT=$workspace" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "XIL_IDENTIFIER=$identifier" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ECUTEST_STEP_NAME=$stepName" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TBC_RELATIVE_PATH=Configurations\$configurationFolder\${configurationFolder}_TestBenchConfig.tbc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TCF_RELATIVE_PATH=Configurations\$configurationFolder\${configurationFolder}_TestConfig.tcf" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Generate TestGuide playbook
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $targetEcu = $env:TARGET_ECU.Trim()
+
+          $playbook = [ordered]@{
+            metadata = [ordered]@{
+              name = "$env:PLAYBOOK_NAME - $env:JIRA_KEY - $env:TARGET_ECU"
+              taskNameTemplate = '${playbook_name} (${playbook_datetime}) ${distribution_count}'
+              labels = @('L2_Quality_Gate', $env:DOMAIN, $env:CW_RELEASE, $env:JIRA_KEY)
+            }
+            workspace = [ordered]@{
+              source = [ordered]@{
+                path = $env:TESTGUIDE_ROOT
+                sourceType = 'location'
+              }
+              dependencies = @()
+            }
+            setup = [ordered]@{
+              steps = @(
+                [ordered]@{
+                  reuse = 'always'
+                  keepConfiguration = $false
+                  waitMinutesForLicense = 0
+                  stepName = $env:ECUTEST_STEP_NAME
+                  type = 'ecuTestStart'
+                },
+                [ordered]@{
+                  tbcPath = $env:TBC_RELATIVE_PATH
+                  tcfPath = $env:TCF_RELATIVE_PATH
+                  stepName = 'Test Configuration Selection'
+                  type = 'configuration'
+                }
+              )
+            }
+            execution = [ordered]@{
+              testcases = @(
+                [ordered]@{
+                  relativePath = $env:PROJECT_RELATIVE_PATH
+                  constants = @(
+                    [ordered]@{ label = 'PROJECT_GENERATOR_CT'; value = 'True' },
+                    [ordered]@{ label = 'PROJECT_GENERATOR_TARGETECU'; value = "'$targetEcu'" }
+                  )
+                  stepName = $env:ECUTEST_STEP_NAME
+                  type = 'project'
+                }
+              )
+            }
+            teardown = [ordered]@{
+              steps = @([ordered]@{ type = 'ecuTestStop' })
+            }
+            xilConfigRequirements = @(
+              [ordered]@{
+                label = 'Identifier'
+                category = 'XIL'
+                value = $env:XIL_IDENTIFIER
+                type = 'configuration'
+              }
+            )
+            parameters = @(
+              [ordered]@{ label = 'PROJECT_GENERATOR_TARGETECU'; defaultValue = "'$targetEcu'"; required = $false },
+              [ordered]@{ label = 'PROJECT_GENERATOR_CT'; defaultValue = 'True'; required = $false }
+            )
+          }
+
+          $file = Join-Path $env:RUNNER_TEMP 'l2-playbook.json'
+          $playbook | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $file -Encoding utf8
+          "PLAYBOOK_FILE=$file" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Get-Content -LiteralPath $file -Raw
+
+      - name: Create TestGuide playbook
+        shell: pwsh
+        env:
+          ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headers = @{
+            'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
+            'Accept' = 'application/json'
+            'Content-Type' = 'application/json'
+          }
+          $body = Get-Content -LiteralPath $env:PLAYBOOK_FILE -Raw
+          $response = Invoke-RestMethod -Method Post -Uri $env:ONECX_CREATE_PLAYBOOK_URL -Headers $headers -Body $body
+
+          $playbookId = @($response.id, $response.playbookId, $response.data.id) |
+            Where-Object { -not [System.String]::IsNullOrWhiteSpace([string]$_) } |
+            Select-Object -First 1
+          if (-not $playbookId) {
+            throw "The create-playbook response did not contain id/playbookId. Response: $($response | ConvertTo-Json -Depth 20)"
+          }
+          "TESTGUIDE_PLAYBOOK_ID=$playbookId" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Execute TestGuide playbook
+        shell: pwsh
+        env:
+          ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $targetEcu = $env:TARGET_ECU.Trim()
+          $headers = @{
+            'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
+            'Accept' = 'application/json'
+            'Content-Type' = 'application/json'
+          }
+          $url = $env:ONECX_EXECUTE_PLAYBOOK_URL_TEMPLATE.Replace('{playbookId}', $env:TESTGUIDE_PLAYBOOK_ID)
+          $request = [ordered]@{
+            projectId = [int]$env:ONECX_PROJECT_ID
+            parameters = @(
+              [ordered]@{ label = 'PROJECT_GENERATOR_TARGETECU'; value = "'$targetEcu'" },
+              [ordered]@{ label = 'PROJECT_GENERATOR_CT'; value = 'True' }
+            )
+          } | ConvertTo-Json -Depth 20
+
+          $response = Invoke-RestMethod -Method Post -Uri $url -Headers $headers -Body $request
+          $taskId = @($response.taskId, $response.id, $response.data.taskId) |
+            Where-Object { -not [System.String]::IsNullOrWhiteSpace([string]$_) } |
+            Select-Object -First 1
+          if (-not $taskId) {
+            throw "The execute response did not contain taskId/id. Response: $($response | ConvertTo-Json -Depth 20)"
+          }
+          "TESTGUIDE_TASK_ID=$taskId" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Poll TestGuide execution
+        shell: pwsh
+        env:
+          ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headers = @{ 'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY; 'Accept' = 'application/json' }
+          $url = $env:ONECX_TASK_URL_TEMPLATE.Replace('{taskId}', $env:TESTGUIDE_TASK_ID)
+          $deadline = (Get-Date).AddMinutes(150)
+          $blockedSince = $null
+
+          while ((Get-Date) -lt $deadline) {
+            $task = Invoke-RestMethod -Method Get -Uri $url -Headers $headers
+            $state = [string](@($task.state, $task.status, $task.data.state) | Where-Object { $_ } | Select-Object -First 1)
+            $verdict = [string](@($task.aggregatedVerdict, $task.verdict, $task.data.aggregatedVerdict) | Where-Object { $_ } | Select-Object -First 1)
+            Write-Host "State=$state Verdict=$verdict Task=$env:TESTGUIDE_TASK_ID"
+
+            if ($state -match '^(FINISHED|COMPLETED|COMPLETE|SUCCESS)$') {
+              "TESTGUIDE_VERDICT=$verdict" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+              exit 0
+            }
+            if ($state -match '^(ERROR|FAILED|FAILURE|CANCELLED|CANCELED)$') {
+              throw "TestGuide execution failed. State=$state Verdict=$verdict"
+            }
+            if ($state -eq 'BLOCKED') {
+              if (-not $blockedSince) { $blockedSince = Get-Date }
+              if (((Get-Date) - $blockedSince).TotalMinutes -ge 5) {
+                throw 'TestGuide execution remained BLOCKED for 5 minutes.'
+              }
+            } else {
+              $blockedSince = $null
+            }
+            Start-Sleep -Seconds 15
+          }
+          throw 'TestGuide execution timed out after 150 minutes.'
+
+      - name: Write execution summary
+        if: always()
+        shell: pwsh
+        run: |
+          @"
+          ## L2 Bootloader Compliance
+          - Jira: $env:JIRA_KEY
+          - Domain: $env:DOMAIN
+          - CW: $env:CW_RELEASE
+          - Bench: $env:BENCH_ID
+          - Resource: $env:RESOURCE_NAME
+          - ECU: $env:TARGET_ECU
+          - Project: $env:PROJECT_RELATIVE_PATH
+          - Playbook ID: $env:TESTGUIDE_PLAYBOOK_ID
+          - Task ID: $env:TESTGUIDE_TASK_ID
+          - Verdict: $env:TESTGUIDE_VERDICT
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
