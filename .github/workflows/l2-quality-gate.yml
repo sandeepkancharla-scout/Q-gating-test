@@ -1,185 +1,20 @@
-name: L2 Quality Gate Test
+name: Jira Dispatch Test
 
 on:
   repository_dispatch:
     types:
       - l2_execution
 
-permissions:
-  contents: read
-
 jobs:
-  test-l2:
-    runs-on:
-      - self-hosted
-      - Windows
-      - X64
+  jira-dispatch-test:
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout pipeline repository
-        uses: actions/checkout@v4
-
-      - name: Checkout L2 Quality Gate repository
-        uses: actions/checkout@v4
-        with:
-          repository: scout-motors/eeint-L2-Quality-Gate
-          token: ${{ secrets.HIL_REPO_PAT }}
-          path: eeint-L2-Quality-Gate
-
-      - name: Read Jira payload
-        shell: pwsh
-        env:
-          JIRA_KEY: ${{ github.event.client_payload.jira_key }}
-          JIRA_LABELS: ${{ github.event.client_payload.labels }}
-          CW_RELEASE: ${{ github.event.client_payload.cw_release }}
-          TEST_BENCH: ${{ github.event.client_payload.test_bench }}
-          TARGET_ECU: ${{ github.event.client_payload.target_ecu }}
+      - name: Show Jira payload
+        shell: bash
         run: |
-          $ErrorActionPreference = 'Stop'
-
-          Write-Host "========================================"
-          Write-Host "JIRA PAYLOAD RECEIVED"
-          Write-Host "========================================"
-          Write-Host "Jira Key   : $env:JIRA_KEY"
-          Write-Host "Labels     : $env:JIRA_LABELS"
-          Write-Host "CW Release : $env:CW_RELEASE"
-          Write-Host "Test Bench : $env:TEST_BENCH"
-          Write-Host "Target ECU : $env:TARGET_ECU"
-
-          $required = @{
-            JIRA_KEY = $env:JIRA_KEY
-            LABELS = $env:JIRA_LABELS
-            TEST_BENCH = $env:TEST_BENCH
-            TARGET_ECU = $env:TARGET_ECU
-          }
-
-          foreach ($item in $required.GetEnumerator()) {
-            if ([string]::IsNullOrWhiteSpace([string]$item.Value)) {
-              throw "Missing required input: $($item.Key)"
-            }
-          }
-
-      - name: Resolve L2 project from Jira labels
-        shell: pwsh
-        env:
-          JIRA_LABELS: ${{ github.event.client_payload.labels }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          $labels = @(
-            $env:JIRA_LABELS -split ',' |
-            ForEach-Object { $_.Trim() }
-          )
-
-          Write-Host "Received labels:"
-          $labels | ForEach-Object {
-            Write-Host " - $_"
-          }
-
-          if ($labels -notcontains 'L2_Quality_Gate') {
-            throw "L2_Quality_Gate label is missing."
-          }
-
-          $selected = $null
-
-          if ($labels -contains 'Network_Testing') {
-            $selected = @{
-              Category = 'network-testing'
-              Test = 'NetworkTest'
-              Project = 'eeint-L2-Quality-Gate\ProjectGenerator\Network-Test\NetworkTest.prj'
-            }
-          }
-
-          if (
-            ($labels -contains 'Bootloader_Compliance') -or
-            ($labels -contains 'Bootloader_Compliance_Test') -or
-            ($labels -contains 'Bootloader_Complinace_Test')
-          ) {
-            if ($null -ne $selected) {
-              throw "More than one L2 execution label was supplied."
-            }
-
-            $selected = @{
-              Category = 'bootloader-compliance'
-              Test = 'BootloaderComplianceTest'
-              Project = 'eeint-L2-Quality-Gate\ProjectGenerator\Bootloader-Compliance-Test\BootloaderComplianceTest.prj'
-            }
-          }
-
-          if ($labels -contains 'Diagnostic_Testing') {
-            if ($null -ne $selected) {
-              throw "More than one L2 execution label was supplied."
-            }
-
-            $selected = @{
-              Category = 'diagnostic-testing'
-              Test = 'DiagnosticTest'
-              Project = 'eeint-L2-Quality-Gate\ProjectGenerator\Diagnostic-Test\DiagnosticTest.prj'
-            }
-          }
-
-          if ($null -eq $selected) {
-            throw "No supported L2 execution label was supplied."
-          }
-
-          $projectFile = Join-Path `
-            $env:GITHUB_WORKSPACE `
-            $selected.Project
-
-          if (-not (Test-Path -LiteralPath $projectFile -PathType Leaf)) {
-            throw "Project file does not exist: $projectFile"
-          }
-
-          Write-Host ""
-          Write-Host "========================================"
-          Write-Host "ROUTING SUCCESSFUL"
-          Write-Host "========================================"
-          Write-Host "Category : $($selected.Category)"
-          Write-Host "Test     : $($selected.Test)"
-          Write-Host "Project  : $projectFile"
-
-          "CATEGORY=$($selected.Category)" |
-            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-          "TEST_OR_VALIDATOR=$($selected.Test)" |
-            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-          "PROJECT_FILE=$projectFile" |
-            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      - name: Resolve HIL
-        shell: pwsh
-        env:
-          TEST_BENCH: ${{ github.event.client_payload.test_bench }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          switch ($env:TEST_BENCH.Trim().ToLowerInvariant()) {
-            'syshil1' {
-              $resource = 'syshil1-labtest1'
-              $workspace = 'D:\HIL\Testing\eeint-L2-Quality-Gate'
-            }
-
-            'syshil2' {
-              $resource = 'syshil2-labtest2'
-              $workspace = 'C:\HIL\Testing\eeint-L2-Quality-Gate'
-            }
-
-            default {
-              throw "Unsupported Test Bench: $env:TEST_BENCH"
-            }
-          }
-
-          Write-Host ""
-          Write-Host "========================================"
-          Write-Host "HIL RESOLVED"
-          Write-Host "========================================"
-          Write-Host "Bench     : $env:TEST_BENCH"
-          Write-Host "Resource  : $resource"
-          Write-Host "Workspace : $workspace"
-
-          "RESOURCE_NAME=$resource" |
-            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-          "TESTGUIDE_WORKSPACE=$workspace" |
-            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          echo "Jira: ${{ github.event.client_payload.jira_key }}"
+          echo "Labels: ${{ github.event.client_payload.labels }}"
+          echo "CW: ${{ github.event.client_payload.cw_release }}"
+          echo "Bench: ${{ github.event.client_payload.test_bench }}"
+          echo "ECU: ${{ github.event.client_payload.target_ecu }}"
