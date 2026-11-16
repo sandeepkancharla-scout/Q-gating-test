@@ -1,4 +1,4 @@
-name: L2 Quality Gate - Jira ATX Execution
+name: L2 Quality Gate - Jira Playbook and ATX
 
 on:
   repository_dispatch:
@@ -8,65 +8,43 @@ on:
 permissions:
   contents: read
 
+env:
+  JIRA_KEY: ${{ github.event.client_payload.jira_key }}
+  JIRA_URL: ${{ github.event.client_payload.jira_url }}
+  JIRA_LABELS: ${{ github.event.client_payload.labels }}
+  CW_RELEASE: ${{ github.event.client_payload.cw_release }}
+  TEST_BENCH: ${{ github.event.client_payload.test_bench }}
+  TARGET_ECU: ${{ github.event.client_payload.target_ecu }}
+  FLASH_ARCHIVE_LOCATION: ${{ github.event.client_payload.flash_archive_location }}
+  RAL_FILE_LOCATION: ${{ github.event.client_payload.ral_file_location }}
+  GIT_SUBMODULE: ${{ github.event.client_payload.git_submodule }}
+  TEST_CASES: ${{ github.event.client_payload.test_cases }}
+
+  ONECX_PROJECT_ID: ${{ vars.ONECX_PROJECT_ID }}
+  ONECX_CREATE_PLAYBOOK_URL: ${{ vars.ONECX_CREATE_PLAYBOOK_URL }}
+  ONECX_EXECUTE_PLAYBOOK_URL_TEMPLATE: ${{ vars.ONECX_EXECUTE_PLAYBOOK_URL_TEMPLATE }}
+  ONECX_TASK_URL_TEMPLATE: ${{ vars.ONECX_TASK_URL_TEMPLATE }}
+
+  JFROG_URL: ${{ vars.JFROG_URL }}
+  JFROG_REPOSITORY: ${{ vars.JFROG_REPOSITORY }}
+
 jobs:
-  l2-quality-gate:
-    name: L2 Quality Gate
+  execute-l2-quality-gate:
+    name: Execute L2 Quality Gate
     runs-on:
       - self-hosted
       - Windows
       - X64
-
     timeout-minutes: 180
-
     concurrency:
       group: l2-quality-gate-${{ github.event.client_payload.test_bench }}
       cancel-in-progress: false
 
-    env:
-      # ============================================================
-      # JIRA INPUTS
-      # ============================================================
-
-      JIRA_KEY: ${{ github.event.client_payload.jira_key }}
-      JIRA_URL: ${{ github.event.client_payload.jira_url }}
-      JIRA_LABELS: ${{ github.event.client_payload.labels }}
-
-      CW_RELEASE: ${{ github.event.client_payload.cw_release }}
-      TEST_BENCH: ${{ github.event.client_payload.test_bench }}
-      TARGET_ECU: ${{ github.event.client_payload.target_ecu }}
-
-      FLASH_ARCHIVE_LOCATION: ${{ github.event.client_payload.flash_archive_location }}
-      RAL_FILE_LOCATION: ${{ github.event.client_payload.ral_file_location }}
-
-      GIT_SUBMODULE: ${{ github.event.client_payload.git_submodule }}
-      TEST_CASES: ${{ github.event.client_payload.test_cases }}
-
-      # ============================================================
-      # TESTGUIDE
-      # ============================================================
-
-      ONECX_URL: https://testguide-ssp.onecx.vwgroup.com
-      ONECX_PROJECT_ID: ${{ vars.ONECX_PROJECT_ID }}
-
-      # ============================================================
-      # JFROG
-      # ============================================================
-
-      JFROG_URL: https://artifactory.sctmtrs.xyz/artifactory
-      JFROG_REPOSITORY: eeint-report-files
-
     steps:
-
-      # ============================================================
-      # 1. CHECKOUT PIPELINE REPOSITORY
-      # ============================================================
-
       - name: Checkout Q-gating-test
         uses: actions/checkout@v4
-
-      # ============================================================
-      # 2. CHECKOUT L2 QUALITY GATE PROJECTS
-      # ============================================================
+        with:
+          fetch-depth: 0
 
       - name: Checkout eeint-L2-Quality-Gate
         uses: actions/checkout@v4
@@ -74,1034 +52,577 @@ jobs:
           repository: scout-motors/eeint-L2-Quality-Gate
           token: ${{ secrets.PARENT_REPO_TOKEN }}
           path: eeint-L2-Quality-Gate
+          fetch-depth: 1
 
-      # ============================================================
-      # 3. VALIDATE JIRA PAYLOAD
-      # ============================================================
-
-      - name: Validate Jira payload
+      - name: Validate required Jira inputs
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'JIRA L2 QUALITY GATE REQUEST'
-          Write-Host '========================================'
-
-          $required = @{
-              JIRA_KEY               = $env:JIRA_KEY
-              CW_RELEASE             = $env:CW_RELEASE
-              TEST_BENCH             = $env:TEST_BENCH
-              TARGET_ECU             = $env:TARGET_ECU
-              FLASH_ARCHIVE_LOCATION = $env:FLASH_ARCHIVE_LOCATION
-              RAL_FILE_LOCATION      = $env:RAL_FILE_LOCATION
-              TEST_CASES             = $env:TEST_CASES
+          $required = [ordered]@{
+            JIRA_KEY   = $env:JIRA_KEY
+            LABELS     = $env:JIRA_LABELS
+            CW_RELEASE = $env:CW_RELEASE
+            TEST_BENCH = $env:TEST_BENCH
+            TARGET_ECU = $env:TARGET_ECU
           }
 
           foreach ($item in $required.GetEnumerator()) {
-
-              if ([string]::IsNullOrWhiteSpace([string]$item.Value)) {
-                  throw "Missing Jira input: $($item.Key)"
-              }
+            if ([string]::IsNullOrWhiteSpace([string]$item.Value)) {
+              throw "Missing required Jira input: $($item.Key)"
+            }
           }
 
           if ($env:CW_RELEASE -notmatch '^CW[0-9]{2}$') {
-              throw "Invalid CW Release: $env:CW_RELEASE"
+            throw "CW_RELEASE must use CWXX format. Received: '$env:CW_RELEASE'."
           }
 
-          Write-Host "Jira       : $env:JIRA_KEY"
-          Write-Host "CW         : $env:CW_RELEASE"
+          $labels = $env:JIRA_LABELS -split ',' | ForEach-Object { $_.Trim() }
+          if ($labels -notcontains 'L2_Quality_Gate') {
+            throw "Required label L2_Quality_Gate is missing. Labels: $env:JIRA_LABELS"
+          }
+
+          Write-Host "Jira Key   : $env:JIRA_KEY"
+          Write-Host "Labels     : $env:JIRA_LABELS"
+          Write-Host "CW Release : $env:CW_RELEASE"
           Write-Host "Bench      : $env:TEST_BENCH"
-          Write-Host "ECU        : $env:TARGET_ECU"
-          Write-Host "Flash      : $env:FLASH_ARCHIVE_LOCATION"
-          Write-Host "RAL        : $env:RAL_FILE_LOCATION"
-          Write-Host "Test Cases : $env:TEST_CASES"
+          Write-Host "Target ECU : $env:TARGET_ECU"
 
-      # ============================================================
-      # 4. SELECT DOMAIN + PROJECT
-      # ============================================================
-
-      - name: Resolve L2 project
+      - name: Resolve domain and project
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $labels = "$env:JIRA_LABELS"
-
+          $labels = $env:JIRA_LABELS -split ',' | ForEach-Object { $_.Trim() }
           $routes = @()
 
-          if ($labels -match 'Bootloader[_-]Compliance') {
-
-              $routes += @{
-                  Category = 'bootloader-compliance'
-                  TestName = 'BootloaderComplianceTest'
-                  Project  = 'eeint-L2-Quality-Gate\ProjectGenerator\Bootloader-Compliance-Test\BootloaderComplianceTest.prj'
-              }
+          if (($labels -contains 'Bootloader_Compliance') -or ($labels -contains 'Bootloader_Compliance_Test')) {
+            $routes += [pscustomobject]@{
+              Category = 'bootloader-compliance'
+              TestName = 'BootloaderComplianceTest'
+              Project = 'eeint-L2-Quality-Gate\ProjectGenerator\Bootloader-Compliance-Test\BootloaderComplianceTest.prj'
+            }
           }
 
-          if ($labels -match 'Network[_-]Testing') {
-
-              $routes += @{
-                  Category = 'network-testing'
-                  TestName = 'NetworkTest'
-                  Project  = 'eeint-L2-Quality-Gate\ProjectGenerator\Network-Test\NetworkTest.prj'
-              }
+          if ($labels -contains 'Network_Testing') {
+            $routes += [pscustomobject]@{
+              Category = 'network-testing'
+              TestName = 'NetworkTest'
+              Project = 'eeint-L2-Quality-Gate\ProjectGenerator\Network-Test\NetworkTest.prj'
+            }
           }
 
-          if ($labels -match 'Diagnostic[_-]Testing') {
-
-              $routes += @{
-                  Category = 'diagnostic-testing'
-                  TestName = 'DiagnosticTest'
-                  Project  = 'eeint-L2-Quality-Gate\ProjectGenerator\Diagnostic-Test\DiagnosticTest.prj'
-              }
+          if ($labels -contains 'Diagnostic_Testing') {
+            $routes += [pscustomobject]@{
+              Category = 'diagnostic-testing'
+              TestName = 'DiagnosticTest'
+              Project = 'eeint-L2-Quality-Gate\ProjectGenerator\Diagnostic-Test\DiagnosticTest.prj'
+            }
           }
 
           if ($routes.Count -ne 1) {
-
-              throw "Exactly one L2 domain must be selected. Labels: $labels"
+            throw "Exactly one supported domain label is required. Found $($routes.Count). Labels: $env:JIRA_LABELS"
           }
 
           $route = $routes[0]
-
-          $project = Join-Path $env:GITHUB_WORKSPACE $route.Project
-
-          if (-not (Test-Path -LiteralPath $project)) {
-
-              throw "Project does not exist: $project"
+          $projectFile = Join-Path $env:GITHUB_WORKSPACE $route.Project
+          if (-not (Test-Path -LiteralPath $projectFile -PathType Leaf)) {
+            throw "Selected project was not found: $projectFile"
           }
 
-          "CATEGORY=$($route.Category)" |
-              Out-File $env:GITHUB_ENV -Append -Encoding utf8
-
-          "TEST_OR_VALIDATOR=$($route.TestName)" |
-              Out-File $env:GITHUB_ENV -Append -Encoding utf8
-
-          "PROJECT_FILE=$project" |
-              Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "CATEGORY=$($route.Category)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TEST_OR_VALIDATOR=$($route.TestName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "PROJECT_FILE=$projectFile" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
           Write-Host "Category : $($route.Category)"
           Write-Host "Test     : $($route.TestName)"
-          Write-Host "Project  : $project"
+          Write-Host "Project  : $projectFile"
 
-      # ============================================================
-      # 5. RESOLVE HIL
-      # ============================================================
-
-      - name: Resolve HIL
+      - name: Resolve HIL configuration
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
           switch ($env:TEST_BENCH.Trim().ToLowerInvariant()) {
-
-              'syshil1' {
-
-                  $resource = 'syshil1-labtest1'
-
-                  $testGuideRoot =
-                      'D:\HIL\Testing\eeint-L2-Quality-Gate'
-
-                  $reportRoot =
-                      'D:\HIL\Testing'
-              }
-
-              'syshil2' {
-
-                  $resource = 'syshil2-labtest2'
-
-                  $testGuideRoot =
-                      'C:\HIL\Testing\eeint-L2-Quality-Gate'
-
-                  $reportRoot =
-                      'C:\HIL\Testing'
-              }
-
-              default {
-
-                  throw "Unsupported HIL: $env:TEST_BENCH"
-              }
+            'syshil1' {
+              $resource = 'syshil1-labtest1'
+              $testGuideRoot = 'D:\HIL\Testing\eeint-L2-Quality-Gate'
+              $reportSearchRoot = 'D:\HIL\Testing'
+            }
+            'syshil2' {
+              $resource = 'syshil2-labtest2'
+              $testGuideRoot = 'C:\HIL\Testing\eeint-L2-Quality-Gate'
+              $reportSearchRoot = 'C:\HIL\Testing'
+            }
+            default {
+              throw "Unsupported Test Bench: '$env:TEST_BENCH'."
+            }
           }
 
-          "RESOURCE_NAME=$resource" |
-              Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          $xilIdentifier = "novi_hq/1stfloor/ee_lab_novi/$resource/ControlComputer"
 
-          "TESTGUIDE_ROOT=$testGuideRoot" |
-              Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "RESOURCE_NAME=$resource" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TESTGUIDE_ROOT=$testGuideRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "REPORT_SEARCH_ROOT=$reportSearchRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "XIL_IDENTIFIER=$xilIdentifier" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-          "REPORT_SEARCH_ROOT=$reportRoot" |
-              Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Resource  : $resource"
+          Write-Host "Workspace : $testGuideRoot"
+          Write-Host "XIL ID    : $xilIdentifier"
 
-          $identifier =
-              "novi_hq/1stfloor/ee_lab_novi/$resource/ControlComputer"
-
-          "XIL_IDENTIFIER=$identifier" |
-              Out-File $env:GITHUB_ENV -Append -Encoding utf8
-
-          Write-Host "Resource : $resource"
-          Write-Host "Workspace: $testGuideRoot"
-
-      # ============================================================
-      # 6. COPY SELECTED PROJECT TO TESTGUIDE WORKSPACE
-      # ============================================================
-
-      - name: Prepare TestGuide project
+      - name: Prepare project and artifact directories
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $destinationRoot =
-              Join-Path $env:TESTGUIDE_ROOT 'ProjectGenerator'
+          $projectDirectory = Join-Path $env:TESTGUIDE_ROOT 'ProjectGenerator'
+          New-Item -ItemType Directory -Path $projectDirectory -Force | Out-Null
 
-          New-Item `
-              -ItemType Directory `
-              -Path $destinationRoot `
-              -Force |
-              Out-Null
+          $projectName = Split-Path -Path $env:PROJECT_FILE -Leaf
+          $destination = Join-Path $projectDirectory $projectName
+          Copy-Item -LiteralPath $env:PROJECT_FILE -Destination $destination -Force
 
-          $destination =
-              Join-Path `
-                  $destinationRoot `
-                  (Split-Path $env:PROJECT_FILE -Leaf)
+          $relativeProject = "ProjectGenerator\$projectName"
+          $artifactRoot = Join-Path $env:RUNNER_TEMP 'l2-artifacts'
+          New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $artifactRoot 'atx') -Force | Out-Null
 
-          Copy-Item `
-              -LiteralPath $env:PROJECT_FILE `
-              -Destination $destination `
-              -Force
+          $executionStart = (Get-Date).ToUniversalTime().ToString('o')
+          $timestamp = Get-Date -Format 'yyyy-MM-dd_HHmmss'
 
-          $relativeProject =
-              "ProjectGenerator\" +
-              (Split-Path $env:PROJECT_FILE -Leaf)
+          "PROJECT_RELATIVE_PATH=$relativeProject" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ARTIFACT_ROOT=$artifactRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "EXECUTION_START_UTC=$executionStart" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "RUN_TIMESTAMP=$timestamp" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-          "PROJECT_RELATIVE_PATH=$relativeProject" |
-              Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Validate TestGuide configuration
+        shell: pwsh
+        env:
+          ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
 
-          Write-Host "TestGuide project: $relativeProject"
+          $required = [ordered]@{
+            ONECX_AUTH_KEY = $env:ONECX_AUTH_KEY
+            ONECX_PROJECT_ID = $env:ONECX_PROJECT_ID
+            ONECX_CREATE_PLAYBOOK_URL = $env:ONECX_CREATE_PLAYBOOK_URL
+            ONECX_EXECUTE_PLAYBOOK_URL_TEMPLATE = $env:ONECX_EXECUTE_PLAYBOOK_URL_TEMPLATE
+            ONECX_TASK_URL_TEMPLATE = $env:ONECX_TASK_URL_TEMPLATE
+          }
 
-      # ============================================================
-      # 7. CAPTURE START TIME
-      #    Used later to find only ATX files created by this run.
-      # ============================================================
+          foreach ($item in $required.GetEnumerator()) {
+            if ([string]::IsNullOrWhiteSpace([string]$item.Value)) {
+              throw "Missing TestGuide secret or variable: $($item.Key)"
+            }
+          }
 
-      - name: Capture execution start
+          if (-not $env:ONECX_EXECUTE_PLAYBOOK_URL_TEMPLATE.Contains('{playbookId}')) {
+            throw 'ONECX_EXECUTE_PLAYBOOK_URL_TEMPLATE must contain {playbookId}.'
+          }
+
+          if (-not $env:ONECX_TASK_URL_TEMPLATE.Contains('{taskId}')) {
+            throw 'ONECX_TASK_URL_TEMPLATE must contain {taskId}.'
+          }
+
+      - name: Generate TestGuide playbook JSON
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $start =
-              (Get-Date).ToUniversalTime().ToString('o')
+          $targetEcu = $env:TARGET_ECU.Trim()
+          $constants = @(
+            [ordered]@{
+              name = 'PROJECT_GENERATOR_TARGETECU'
+              label = 'PROJECT_GENERATOR_TARGETECU'
+              value = "'$targetEcu'"
+            },
+            [ordered]@{
+              name = 'PROJECT_GENERATOR_CT'
+              label = 'PROJECT_GENERATOR_CT'
+              value = 'True'
+            }
+          )
 
-          $timestamp =
-              Get-Date -Format 'yyyy-MM-dd_HHmmss'
+          if (-not [string]::IsNullOrWhiteSpace($env:FLASH_ARCHIVE_LOCATION)) {
+            $constants += [ordered]@{
+              name = 'FLASH_ARCHIVE_LOCATION'
+              label = 'FLASH_ARCHIVE_LOCATION'
+              value = $env:FLASH_ARCHIVE_LOCATION
+            }
+          }
 
-          "EXECUTION_START_UTC=$start" |
-              Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          if (-not [string]::IsNullOrWhiteSpace($env:RAL_FILE_LOCATION)) {
+            $constants += [ordered]@{
+              name = 'RAL_FILE_LOCATION'
+              label = 'RAL_FILE_LOCATION'
+              value = $env:RAL_FILE_LOCATION
+            }
+          }
 
-          "RUN_TIMESTAMP=$timestamp" |
-              Out-File $env:GITHUB_ENV -Append -Encoding utf8
-
-          $artifactRoot =
-              Join-Path `
-                  $env:RUNNER_TEMP `
-                  'l2-artifacts'
-
-          New-Item `
-              -ItemType Directory `
-              -Path $artifactRoot `
-              -Force |
-              Out-Null
-
-          "ARTIFACT_ROOT=$artifactRoot" |
-              Out-File $env:GITHUB_ENV -Append -Encoding utf8
-
-      # ============================================================
-      # 8. CREATE TESTGUIDE PLAYBOOK JSON
-      # ============================================================
-
-      - name: Generate TestGuide playbook
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          $targetEcu =
-              $env:TARGET_ECU.Trim()
+          if (-not [string]::IsNullOrWhiteSpace($env:TEST_CASES)) {
+            $constants += [ordered]@{
+              name = 'TEST_CASES'
+              label = 'TEST_CASES'
+              value = $env:TEST_CASES
+            }
+          }
 
           $playbook = [ordered]@{
-
-              metadata = [ordered]@{
-
-                  name =
-                      "L2-$env:CATEGORY-$env:JIRA_KEY"
-
-                  taskNameTemplate =
-                      '${playbook_name} (${playbook_datetime}) ${distribution_count}'
-
-                  labels = @(
-                      'L2_Quality_Gate',
-                      $env:CATEGORY,
-                      $env:CW_RELEASE,
-                      $env:JIRA_KEY
-                  )
+            metadata = [ordered]@{
+              name = "L2-$env:CATEGORY-$env:JIRA_KEY-$env:RUN_TIMESTAMP"
+              taskNameTemplate = '${playbook_name} (${playbook_datetime}) ${distribution_count}'
+              labels = @('L2_Quality_Gate', $env:CATEGORY, $env:CW_RELEASE, $env:JIRA_KEY)
+            }
+            workspace = [ordered]@{
+              source = [ordered]@{
+                path = $env:TESTGUIDE_ROOT
+                sourceType = 'location'
               }
-
-              workspace = [ordered]@{
-
-                  source = [ordered]@{
-
-                      path =
-                          $env:TESTGUIDE_ROOT
-
-                      sourceType =
-                          'location'
-                  }
-
-                  dependencies = @()
-              }
-
-              setup = [ordered]@{
-
-                  steps = @(
-
-                      [ordered]@{
-
-                          reuse =
-                              'always'
-
-                          keepConfiguration =
-                              $false
-
-                          waitMinutesForLicense =
-                              0
-
-                          stepName =
-                              "ecu.test $env:RESOURCE_NAME Start"
-
-                          type =
-                              'ecuTestStart'
-                      }
-                  )
-              }
-
-              execution = [ordered]@{
-
-                  testcases = @(
-
-                      [ordered]@{
-
-                          relativePath =
-                              $env:PROJECT_RELATIVE_PATH
-
-                          stepName =
-                              "ecu.test $env:RESOURCE_NAME Start"
-
-                          type =
-                              'project'
-
-                          constants = @(
-
-                              [ordered]@{
-
-                                  name =
-                                      'PROJECT_GENERATOR_TARGETECU'
-
-                                  label =
-                                      'PROJECT_GENERATOR_TARGETECU'
-
-                                  value =
-                                      "'$targetEcu'"
-                              },
-
-                              [ordered]@{
-
-                                  name =
-                                      'PROJECT_GENERATOR_CT'
-
-                                  label =
-                                      'PROJECT_GENERATOR_CT'
-
-                                  value =
-                                      'True'
-                              }
-                          )
-                      }
-                  )
-              }
-
-              teardown = [ordered]@{
-
-                  steps = @(
-
-                      [ordered]@{
-
-                          type =
-                              'ecuTestStop'
-                      }
-                  )
-              }
-
-              xilConfigRequirements = @(
-
-                  [ordered]@{
-
-                      label =
-                          'Identifier'
-
-                      category =
-                          'XIL'
-
-                      value =
-                          $env:XIL_IDENTIFIER
-
-                      type =
-                          'configuration'
-                  }
+              dependencies = @()
+            }
+            setup = [ordered]@{
+              steps = @(
+                [ordered]@{
+                  reuse = 'always'
+                  keepConfiguration = $false
+                  waitMinutesForLicense = 0
+                  stepName = "ecu.test $env:RESOURCE_NAME Start"
+                  type = 'ecuTestStart'
+                }
               )
-
-              parameters = @(
-
-                  [ordered]@{
-
-                      name =
-                          'PROJECT_GENERATOR_TARGETECU'
-
-                      label =
-                          'PROJECT_GENERATOR_TARGETECU'
-
-                      defaultValue =
-                          "'$targetEcu'"
-
-                      required =
-                          $false
-                  },
-
-                  [ordered]@{
-
-                      name =
-                          'PROJECT_GENERATOR_CT'
-
-                      label =
-                          'PROJECT_GENERATOR_CT'
-
-                      defaultValue =
-                          'True'
-
-                      required =
-                          $false
-                  }
+            }
+            execution = [ordered]@{
+              testcases = @(
+                [ordered]@{
+                  relativePath = $env:PROJECT_RELATIVE_PATH
+                  constants = $constants
+                  stepName = "ecu.test $env:RESOURCE_NAME Start"
+                  type = 'project'
+                }
               )
+            }
+            teardown = [ordered]@{
+              steps = @(
+                [ordered]@{
+                  type = 'ecuTestStop'
+                }
+              )
+            }
+            xilConfigRequirements = @(
+              [ordered]@{
+                label = 'Identifier'
+                category = 'XIL'
+                value = $env:XIL_IDENTIFIER
+                type = 'configuration'
+              }
+            )
+            parameters = @(
+              [ordered]@{
+                name = 'PROJECT_GENERATOR_TARGETECU'
+                label = 'PROJECT_GENERATOR_TARGETECU'
+                defaultValue = "'$targetEcu'"
+                required = $false
+              },
+              [ordered]@{
+                name = 'PROJECT_GENERATOR_CT'
+                label = 'PROJECT_GENERATOR_CT'
+                defaultValue = 'True'
+                required = $false
+              }
+            )
           }
 
-          $playbookFile =
-              Join-Path `
-                  $env:ARTIFACT_ROOT `
-                  'playbook.json'
+          $playbookFile = Join-Path $env:ARTIFACT_ROOT 'playbook.json'
+          $playbook | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $playbookFile -Encoding utf8
+          "PLAYBOOK_FILE=$playbookFile" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-          $playbook |
-              ConvertTo-Json -Depth 30 |
-              Set-Content `
-                  -LiteralPath $playbookFile `
-                  -Encoding utf8
-
-          "PLAYBOOK_FILE=$playbookFile" |
-              Out-File $env:GITHUB_ENV -Append -Encoding utf8
-
-      # ============================================================
-      # 9. CREATE PLAYBOOK
-      #
-      # Keep ONECX_CREATE_PLAYBOOK_URL as a repository variable.
-      # This prevents us from inventing the endpoint.
-      # ============================================================
+          Write-Host "Generated playbook: $playbookFile"
 
       - name: Create TestGuide playbook
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
-          CREATE_URL: ${{ vars.ONECX_CREATE_PLAYBOOK_URL }}
         run: |
           $ErrorActionPreference = 'Stop'
 
-          if ([string]::IsNullOrWhiteSpace($env:CREATE_URL)) {
-              throw 'ONECX_CREATE_PLAYBOOK_URL repository variable is missing.'
-          }
-
           $headers = @{
-
-              'TestGuide-AuthKey' =
-                  $env:ONECX_AUTH_KEY
-
-              Accept =
-                  'application/json'
-
-              'Content-Type' =
-                  'application/json'
+            'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
+            Accept = 'application/json'
+            'Content-Type' = 'application/json'
           }
 
-          $body =
-              Get-Content `
-                  -LiteralPath $env:PLAYBOOK_FILE `
-                  -Raw
+          $body = Get-Content -LiteralPath $env:PLAYBOOK_FILE -Raw
+          $response = Invoke-RestMethod -Method Post -Uri $env:ONECX_CREATE_PLAYBOOK_URL -Headers $headers -Body $body
+          $response | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath (Join-Path $env:ARTIFACT_ROOT 'playbook-create-response.json') -Encoding utf8
 
-          $response =
-              Invoke-RestMethod `
-                  -Method Post `
-                  -Uri $env:CREATE_URL `
-                  -Headers $headers `
-                  -Body $body
-
-          $response |
-              ConvertTo-Json -Depth 30 |
-              Set-Content `
-                  (Join-Path `
-                      $env:ARTIFACT_ROOT `
-                      'playbook-create-response.json') `
-                  -Encoding utf8
-
-          $playbookId =
-              @(
-                  $response.id,
-                  $response.playbookId,
-                  $response.data.id
-              ) |
-              Where-Object { $_ } |
-              Select-Object -First 1
+          $playbookId = @(
+            $response.id
+            $response.playbookId
+            $response.data.id
+          ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -First 1
 
           if (-not $playbookId) {
-
-              throw 'Create Playbook response did not contain a Playbook ID.'
+            throw 'Create-playbook response did not contain id/playbookId.'
           }
 
-          "TESTGUIDE_PLAYBOOK_ID=$playbookId" |
-              Out-File $env:GITHUB_ENV -Append -Encoding utf8
-
-      # ============================================================
-      # 10. EXECUTE PLAYBOOK
-      # ============================================================
+          "TESTGUIDE_PLAYBOOK_ID=$playbookId" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Playbook ID: $playbookId"
 
       - name: Execute TestGuide playbook
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
-          EXECUTE_URL_TEMPLATE: ${{ vars.ONECX_EXECUTE_PLAYBOOK_URL_TEMPLATE }}
         run: |
           $ErrorActionPreference = 'Stop'
 
-          if (
-              [string]::IsNullOrWhiteSpace(
-                  $env:EXECUTE_URL_TEMPLATE
-              )
-          ) {
-              throw 'ONECX_EXECUTE_PLAYBOOK_URL_TEMPLATE is missing.'
-          }
-
-          $url =
-              $env:EXECUTE_URL_TEMPLATE.Replace(
-                  '{playbookId}',
-                  $env:TESTGUIDE_PLAYBOOK_ID
-              )
-
           $headers = @{
-
-              'TestGuide-AuthKey' =
-                  $env:ONECX_AUTH_KEY
-
-              Accept =
-                  'application/json'
-
-              'Content-Type' =
-                  'application/json'
+            'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
+            Accept = 'application/json'
+            'Content-Type' = 'application/json'
           }
 
+          $executeUrl = $env:ONECX_EXECUTE_PLAYBOOK_URL_TEMPLATE.Replace('{playbookId}', $env:TESTGUIDE_PLAYBOOK_ID)
           $body = [ordered]@{
+            projectId = [int]$env:ONECX_PROJECT_ID
+            parameters = @(
+              [ordered]@{
+                label = 'PROJECT_GENERATOR_TARGETECU'
+                value = "'$($env:TARGET_ECU)'"
+              },
+              [ordered]@{
+                label = 'PROJECT_GENERATOR_CT'
+                value = 'True'
+              }
+            )
+          } | ConvertTo-Json -Depth 20
 
-              projectId =
-                  [int]$env:ONECX_PROJECT_ID
+          $response = Invoke-RestMethod -Method Post -Uri $executeUrl -Headers $headers -Body $body
+          $response | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath (Join-Path $env:ARTIFACT_ROOT 'execution-response.json') -Encoding utf8
 
-              parameters = @(
-
-                  [ordered]@{
-
-                      label =
-                          'PROJECT_GENERATOR_TARGETECU'
-
-                      value =
-                          "'$($env:TARGET_ECU)'"
-                  },
-
-                  [ordered]@{
-
-                      label =
-                          'PROJECT_GENERATOR_CT'
-
-                      value =
-                          'True'
-                  }
-              )
-          } |
-          ConvertTo-Json -Depth 20
-
-          $response =
-              Invoke-RestMethod `
-                  -Method Post `
-                  -Uri $url `
-                  -Headers $headers `
-                  -Body $body
-
-          $response |
-              ConvertTo-Json -Depth 30 |
-              Set-Content `
-                  (Join-Path `
-                      $env:ARTIFACT_ROOT `
-                      'execution-response.json') `
-                  -Encoding utf8
-
-          $taskId =
-              @(
-                  $response.taskId,
-                  $response.id,
-                  $response.data.taskId
-              ) |
-              Where-Object { $_ } |
-              Select-Object -First 1
+          $taskId = @(
+            $response.taskId
+            $response.id
+            $response.data.taskId
+          ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -First 1
 
           if (-not $taskId) {
-
-              throw 'Execution response did not contain Task ID.'
+            throw 'Execute-playbook response did not contain taskId/id.'
           }
 
-          "TESTGUIDE_TASK_ID=$taskId" |
-              Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "TESTGUIDE_TASK_ID=$taskId" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-          Write-Host "Execution Task: $taskId"
-
-      # ============================================================
-      # 11. POLL EXECUTION
-      # ============================================================
+          Write-Host '========================================'
+          Write-Host 'PLAYBOOK EXECUTION STARTED'
+          Write-Host '========================================'
+          Write-Host "Jira Key    : $env:JIRA_KEY"
+          Write-Host "Playbook ID : $env:TESTGUIDE_PLAYBOOK_ID"
+          Write-Host "Task ID     : $taskId"
+          Write-Host "ECU         : $env:TARGET_ECU"
+          Write-Host "Bench       : $env:TEST_BENCH"
+          Write-Host "Resource    : $env:RESOURCE_NAME"
+          Write-Host "Project     : $env:PROJECT_RELATIVE_PATH"
 
       - name: Wait for TestGuide execution
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
-          TASK_URL_TEMPLATE: ${{ vars.ONECX_TASK_URL_TEMPLATE }}
         run: |
           $ErrorActionPreference = 'Stop'
-
-          $url =
-              $env:TASK_URL_TEMPLATE.Replace(
-                  '{taskId}',
-                  $env:TESTGUIDE_TASK_ID
-              )
 
           $headers = @{
-
-              'TestGuide-AuthKey' =
-                  $env:ONECX_AUTH_KEY
-
-              Accept =
-                  'application/json'
+            'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
+            Accept = 'application/json'
           }
-
-          $deadline =
-              (Get-Date).AddMinutes(150)
-
-          $blockedSince =
-              $null
+          $taskUrl = $env:ONECX_TASK_URL_TEMPLATE.Replace('{taskId}', $env:TESTGUIDE_TASK_ID)
+          $deadline = (Get-Date).AddMinutes(150)
+          $blockedSince = $null
+          $finished = $false
 
           while ((Get-Date) -lt $deadline) {
+            $task = Invoke-RestMethod -Method Get -Uri $taskUrl -Headers $headers
+            $task | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath (Join-Path $env:ARTIFACT_ROOT 'task-latest.json') -Encoding utf8
 
-              $task =
-                  Invoke-RestMethod `
-                      -Method Get `
-                      -Uri $url `
-                      -Headers $headers
+            $state = [string](@(
+              $task.state
+              $task.status
+              $task.data.state
+            ) | Where-Object { $_ } | Select-Object -First 1)
 
-              $state =
-                  [string](
-                      @(
-                          $task.state,
-                          $task.status,
-                          $task.data.state
-                      ) |
-                      Where-Object { $_ } |
-                      Select-Object -First 1
-                  )
+            $verdict = [string](@(
+              $task.aggregatedVerdict
+              $task.verdict
+              $task.data.aggregatedVerdict
+            ) | Where-Object { $_ } | Select-Object -First 1)
 
-              $verdict =
-                  [string](
-                      @(
-                          $task.aggregatedVerdict,
-                          $task.verdict,
-                          $task.data.aggregatedVerdict
-                      ) |
-                      Where-Object { $_ } |
-                      Select-Object -First 1
-                  )
+            Write-Host "Task=$env:TESTGUIDE_TASK_ID State=$state Verdict=$verdict Time=$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
 
-              Write-Host (
-                  "Task=$env:TESTGUIDE_TASK_ID " +
-                  "State=$state " +
-                  "Verdict=$verdict"
-              )
+            if ($state -match '^(FINISHED|COMPLETED|COMPLETE|SUCCESS)$') {
+              "TESTGUIDE_VERDICT=$verdict" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+              $finished = $true
+              break
+            }
 
-              if (
-                  $state -match
-                  '^(FINISHED|COMPLETED|COMPLETE|SUCCESS)$'
-              ) {
+            if ($state -match '^(ERROR|FAILED|FAILURE|CANCELLED|CANCELED)$') {
+              throw "TestGuide execution failed. State=$state Verdict=$verdict"
+            }
 
-                  "TESTGUIDE_VERDICT=$verdict" |
-                      Out-File `
-                          $env:GITHUB_ENV `
-                          -Append `
-                          -Encoding utf8
-
-                  break
+            if ($state -eq 'BLOCKED') {
+              if (-not $blockedSince) {
+                $blockedSince = Get-Date
               }
-
-              if (
-                  $state -match
-                  '^(ERROR|FAILED|FAILURE|CANCELLED|CANCELED)$'
-              ) {
-
-                  throw (
-                      "TestGuide execution failed. " +
-                      "State=$state Verdict=$verdict"
-                  )
+              if (((Get-Date) - $blockedSince).TotalMinutes -ge 5) {
+                throw 'TestGuide execution remained BLOCKED for 5 minutes.'
               }
+            }
+            else {
+              $blockedSince = $null
+            }
 
-              if ($state -eq 'BLOCKED') {
-
-                  if (-not $blockedSince) {
-                      $blockedSince = Get-Date
-                  }
-
-                  if (
-                      ((Get-Date) - $blockedSince).TotalMinutes -ge 5
-                  ) {
-
-                      throw (
-                          'TestGuide execution remained BLOCKED ' +
-                          'for more than 5 minutes.'
-                      )
-                  }
-              }
-              else {
-
-                  $blockedSince =
-                      $null
-              }
-
-              Start-Sleep -Seconds 15
+            Start-Sleep -Seconds 15
           }
 
-          if ((Get-Date) -ge $deadline) {
-
-              throw (
-                  'TestGuide execution timed out after 150 minutes.'
-              )
+          if (-not $finished) {
+            throw 'TestGuide execution timed out after 150 minutes.'
           }
 
-      # ============================================================
-      # 12. COLLECT GENERATED ATX
-      #
-      # ECU-TEST/TestGuide has already generated the ATX.
-      # We find only ATX files modified after this run started.
-      # ============================================================
-
-      - name: Collect generated ATX reports
+      - name: Collect ATX files generated by this run
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $start =
-              [DateTime]::Parse($env:EXECUTION_START_UTC).ToLocalTime()
+          $executionStart = [datetime]::Parse($env:EXECUTION_START_UTC).ToLocalTime()
+          $atxOutput = Join-Path $env:ARTIFACT_ROOT 'atx'
 
           $searchRoots = @(
+            (Join-Path $env:TESTGUIDE_ROOT 'TestReports')
+            (Join-Path $env:REPORT_SEARCH_ROOT 'TestReports')
+            $env:TESTGUIDE_ROOT
+          ) | Select-Object -Unique
 
-              (Join-Path $env:TESTGUIDE_ROOT 'TestReports'),
-
-              (Join-Path $env:REPORT_SEARCH_ROOT 'TestReports'),
-
-              $env:TESTGUIDE_ROOT
-          ) |
-          Select-Object -Unique
-
-          $atxFiles =
-              @()
-
+          $atxFiles = @()
           foreach ($root in $searchRoots) {
+            if (-not (Test-Path -LiteralPath $root -PathType Container)) {
+              continue
+            }
 
-              if (-not (Test-Path -LiteralPath $root)) {
-                  continue
-              }
-
-              Write-Host "Searching ATX under: $root"
-
-              $found =
-                  Get-ChildItem `
-                      -LiteralPath $root `
-                      -Filter '*.atx' `
-                      -File `
-                      -Recurse `
-                      -ErrorAction SilentlyContinue |
-                  Where-Object {
-                      $_.LastWriteTime -ge $start.AddMinutes(-2)
-                  }
-
-              $atxFiles +=
-                  $found
+            Write-Host "Searching for ATX files under: $root"
+            $atxFiles += Get-ChildItem -LiteralPath $root -Filter '*.atx' -File -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.LastWriteTime -ge $executionStart.AddMinutes(-2) }
           }
 
-          $atxFiles =
-              $atxFiles |
-              Sort-Object FullName -Unique
-
+          $atxFiles = @($atxFiles | Sort-Object FullName -Unique)
           if ($atxFiles.Count -eq 0) {
-
-              throw (
-                  'No ATX file generated by this execution was found.'
-              )
+            throw 'No ATX file generated by this execution was found on the runner.'
           }
 
-          $atxOutput =
-              Join-Path `
-                  $env:ARTIFACT_ROOT `
-                  'atx'
-
-          New-Item `
-              -ItemType Directory `
-              -Path $atxOutput `
-              -Force |
-              Out-Null
-
-          foreach ($atx in $atxFiles) {
-
-              Write-Host "ATX: $($atx.FullName)"
-
-              Copy-Item `
-                  -LiteralPath $atx.FullName `
-                  -Destination $atxOutput `
-                  -Force
+          foreach ($atxFile in $atxFiles) {
+            $destinationName = "$env:JIRA_KEY-$($atxFile.Name)"
+            Copy-Item -LiteralPath $atxFile.FullName -Destination (Join-Path $atxOutput $destinationName) -Force
+            Write-Host "Collected: $($atxFile.FullName)"
           }
 
-          $count =
-              (Get-ChildItem `
-                  -LiteralPath $atxOutput `
-                  -Filter '*.atx' `
-                  -File).Count
+          "ATX_DIRECTORY=$atxOutput" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Collected ATX files: $($atxFiles.Count)"
 
-          Write-Host ''
-          Write-Host "Collected ATX files: $count"
-
-          "ATX_DIRECTORY=$atxOutput" |
-              Out-File `
-                  $env:GITHUB_ENV `
-                  -Append `
-                  -Encoding utf8
-
-      # ============================================================
-      # 13. CREATE JFROG DESTINATION
-      #
-      # EXACT REQUIRED STRUCTURE:
-      #
-      # L2_Quality_Gate/
-      # CWxx/
-      # ECU/
-      # category/
-      # test-or-validator/
-      # Date_TimeStamp/
-      # ============================================================
-
-      - name: Build JFrog path
+      - name: Build JFrog destination
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $jfrogPath = (
-              "L2_Quality_Gate/" +
-              "$env:CW_RELEASE/" +
-              "$env:TARGET_ECU/" +
-              "$env:CATEGORY/" +
-              "$env:TEST_OR_VALIDATOR/" +
-              "$env:RUN_TIMESTAMP/"
+          $segments = @(
+            $env:CW_RELEASE
+            $env:TARGET_ECU
+            $env:CATEGORY
+            $env:TEST_OR_VALIDATOR
+            $env:RUN_TIMESTAMP
           )
 
-          "JFROG_TARGET_PATH=$jfrogPath" |
-              Out-File `
-                  $env:GITHUB_ENV `
-                  -Append `
-                  -Encoding utf8
+          foreach ($segment in $segments) {
+            if ($segment -notmatch '^[A-Za-z0-9._-]+$') {
+              throw "Unsafe JFrog path segment: '$segment'"
+            }
+          }
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'JFROG DESTINATION'
-          Write-Host '========================================'
-          Write-Host $jfrogPath
+          $targetPath = 'L2_Quality_Gate/' + ($segments -join '/') + '/'
+          "JFROG_TARGET_PATH=$targetPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "JFrog target: $targetPath"
 
-      # ============================================================
-      # 14. UPLOAD ATX TO JFROG
-      # ============================================================
-
-      - name: Upload ATX reports to JFrog
+      - name: Upload ATX files to JFrog
         shell: pwsh
         env:
-          JFROG_USER: ${{ secrets.JFROG_USER }}
           JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $pair =
-              "$env:JFROG_USER`:$env:JFROG_TOKEN"
+          $required = [ordered]@{
+            JFROG_URL = $env:JFROG_URL
+            JFROG_REPOSITORY = $env:JFROG_REPOSITORY
+            JFROG_TOKEN = $env:JFROG_TOKEN
+          }
 
-          $encodedCredentials =
-              [Convert]::ToBase64String(
-                  [Text.Encoding]::ASCII.GetBytes($pair)
-              )
+          foreach ($item in $required.GetEnumerator()) {
+            if ([string]::IsNullOrWhiteSpace([string]$item.Value)) {
+              throw "Missing JFrog secret or variable: $($item.Key)"
+            }
+          }
 
           $headers = @{
-              Authorization =
-                  "Basic $encodedCredentials"
+            Authorization = "Bearer $env:JFROG_TOKEN"
           }
 
-          $atxFiles =
-              Get-ChildItem `
-                  -LiteralPath $env:ATX_DIRECTORY `
-                  -Filter '*.atx' `
-                  -File
-
-          if (-not $atxFiles) {
-
-              throw 'No ATX files are available for JFrog upload.'
+          $files = Get-ChildItem -LiteralPath $env:ATX_DIRECTORY -Filter '*.atx' -File
+          if (-not $files) {
+            throw 'No ATX files are available for JFrog upload.'
           }
 
-          foreach ($file in $atxFiles) {
+          $baseUrl = $env:JFROG_URL.TrimEnd('/')
+          $repository = $env:JFROG_REPOSITORY.Trim('/')
 
-              $fileName =
-                  [Uri]::EscapeDataString($file.Name)
-
-              $uploadUrl = (
-                  "$env:JFROG_URL/" +
-                  "$env:JFROG_REPOSITORY/" +
-                  "$env:JFROG_TARGET_PATH" +
-                  "$fileName"
-              )
-
-              Write-Host (
-                  "Uploading ATX: " +
-                  $file.Name
-              )
-
-              Invoke-RestMethod `
-                  -Method Put `
-                  -Uri $uploadUrl `
-                  -Headers $headers `
-                  -InFile $file.FullName `
-                  -ContentType 'application/octet-stream'
+          foreach ($file in $files) {
+            $encodedName = [uri]::EscapeDataString($file.Name)
+            $uploadUrl = "$baseUrl/$repository/$env:JFROG_TARGET_PATH$encodedName"
+            Write-Host "Uploading: $($file.Name)"
+            Invoke-RestMethod -Method Put -Uri $uploadUrl -Headers $headers -InFile $file.FullName -ContentType 'application/octet-stream'
           }
 
-          $jfrogFolderUrl = (
-              "$env:JFROG_URL/" +
-              "$env:JFROG_REPOSITORY/" +
-              "$env:JFROG_TARGET_PATH"
-          )
-
-          "JFROG_REPORT_URL=$jfrogFolderUrl" |
-              Out-File `
-                  $env:GITHUB_ENV `
-                  -Append `
-                  -Encoding utf8
-
-      # ============================================================
-      # 15. CREATE EXECUTION METADATA
-      # ============================================================
+          $jfrogFolderUrl = "$baseUrl/$repository/$env:JFROG_TARGET_PATH"
+          "JFROG_REPORT_URL=$jfrogFolderUrl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Create execution metadata
         if: always()
         shell: pwsh
         run: |
-          if (
-              [string]::IsNullOrWhiteSpace(
-                  $env:ARTIFACT_ROOT
-              )
-          ) {
-
-              $artifactRoot =
-                  Join-Path `
-                      $env:RUNNER_TEMP `
-                      'l2-artifacts'
-
-              New-Item `
-                  -ItemType Directory `
-                  -Path $artifactRoot `
-                  -Force |
-                  Out-Null
-
-              "ARTIFACT_ROOT=$artifactRoot" |
-                  Out-File `
-                      $env:GITHUB_ENV `
-                      -Append `
-                      -Encoding utf8
-          }
-          else {
-
-              $artifactRoot =
-                  $env:ARTIFACT_ROOT
+          $artifactRoot = $env:ARTIFACT_ROOT
+          if ([string]::IsNullOrWhiteSpace($artifactRoot)) {
+            $artifactRoot = Join-Path $env:RUNNER_TEMP 'l2-artifacts'
+            New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
+            "ARTIFACT_ROOT=$artifactRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           }
 
           $metadata = [ordered]@{
-
-              jiraKey =
-                  $env:JIRA_KEY
-
-              githubRepository =
-                  '${{ github.repository }}'
-
-              githubRunId =
-                  '${{ github.run_id }}'
-
-              cwRelease =
-                  $env:CW_RELEASE
-
-              targetEcu =
-                  $env:TARGET_ECU
-
-              testBench =
-                  $env:TEST_BENCH
-
-              category =
-                  $env:CATEGORY
-
-          ATOR
-
-              testGuideResource =
-                  $env:RESOURCE_NAME
-
-              testGuideTaskId =
-                  $env:TESTGUIDE_TASK_ID
-
-              verdict =
-                  $env:TESTGUIDE_VERDICT
-
-              jfrogPath =
-                  $env:JFROG_TARGET_PATH
-
-              timestamp =
-                  $env:RUN_TIMESTAMP
+            jiraKey = $env:JIRA_KEY
+            jiraUrl = $env:JIRA_URL
+            githubRepository = '${{ github.repository }}'
+            githubRunId = '${{ github.run_id }}'
+            githubRunAttempt = '${{ github.run_attempt }}'
+            cwRelease = $env:CW_RELEASE
+            targetEcu = $env:TARGET_ECU
+            testBench = $env:TEST_BENCH
+            category = $env:CATEGORY
+            testOrValidator = $env:TEST_OR_VALIDATOR
+            project = $env:PROJECT_RELATIVE_PATH
+            testGuideResource = $env:RESOURCE_NAME
+            testGuidePlaybookId = $env:TESTGUIDE_PLAYBOOK_ID
+            testGuideTaskId = $env:TESTGUIDE_TASK_ID
+            verdict = $env:TESTGUIDE_VERDICT
+            jfrogPath = $env:JFROG_TARGET_PATH
+            jfrogUrl = $env:JFROG_REPORT_URL
+            timestamp = $env:RUN_TIMESTAMP
           }
 
-          $metadata |
-              ConvertTo-Json -Depth 10 |
-              Set-Content `
-                  (Join-Path `
-     ata.json') `
-                  -Encoding utf8
+          $metadata | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $artifactRoot 'execution-metadata.json') -Encoding utf8
 
-      # ============================================================
-      # 16. GITHUB ACTIONS ARTIFACT
-      #
-      # Contains ATX + metadata + playbook/execution JSON.
-      # ============================================================
-
-      - name: Upload ATX and execution artifacts
+      - name: Upload pipeline artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -1110,10 +631,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      # ============================================================
-      # 17. SUMMARY
-      # ============================================================
-
       - name: Write execution summary
         if: always()
         shell: pwsh
@@ -1121,31 +638,16 @@ jobs:
           @"
           ## L2 Quality Gate
 
-          **Jira:** $env:JIRA_KEY
-
-          **CW Release:** $env:CW_RELEASE
-
-          **ECU:** $env:TARGET_ECU
-
-          **Bench:** $env:TEST_BENCH
-
-          **Category:** $env:CATEGORY
-
-          **Test / Validator:** $env:TEST_OR_VALIDATOR
-
-          **TestGuide Task:** $env:TESTGUIDE_TASK_ID
-
-          **Verdict:** $env:TESTGUIDE_VERDICT
-
-          **JFrog Path:**
-
-          $env:JFROG_TARGET_PATH
-
-          **JFrog URL:**
-
-          $env:JFROG_REPORT_URL
-          "@ |
-          Out-File `
-              $env:GITHUB_STEP_SUMMARY `
-              -Append `
-              -Encoding utf8
+          - Jira: $env:JIRA_KEY
+          - CW Release: $env:CW_RELEASE
+          - ECU: $env:TARGET_ECU
+          - Bench: $env:TEST_BENCH
+          - Category: $env:CATEGORY
+          - Test/Validator: $env:TEST_OR_VALIDATOR
+          - Project: $env:PROJECT_RELATIVE_PATH
+          - TestGuide Playbook: $env:TESTGUIDE_PLAYBOOK_ID
+          - TestGuide Task: $env:TESTGUIDE_TASK_ID
+          - Verdict: $env:TESTGUIDE_VERDICT
+          - JFrog path: $env:JFROG_TARGET_PATH
+          - JFrog URL: $env:JFROG_REPORT_URL
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
