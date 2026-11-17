@@ -170,7 +170,11 @@ jobs:
           if (
               $testBench -notin @(
                   'syshil1',
-                  'syshil2'
+                  'syshil2',
+                  'subsys1',
+                  'subsys2',
+                  'info1',
+                  'info2'
               )
           ) {
               throw "Unsupported test bench [$testBench]."
@@ -349,7 +353,7 @@ jobs:
                       'syshil1-labtest1'
 
                   $configurationFolder =
-                      'SUBSYS1'
+                      'SYSHIL2'
               }
 
               'syshil2' {
@@ -357,8 +361,37 @@ jobs:
                       'syshil2-labtest2'
 
                   $configurationFolder =
+                      'SYSHIL2'
+              }
+              'info1' {
+                  $resource =
+                      'subsysinfo1-infotest1'
+
+                  $configurationFolder =
                       'SUBSYS1'
               }
+              'info2' {
+                  $resource =
+                      'subsysinfo2-infotest2'
+
+                  $configurationFolder =
+                      'SUBSYS2'
+              }
+              'subsys1' {
+                  $resource =
+                      'subsysinfo1-infotest1'
+
+                  $configurationFolder =
+                      'SUBSYS1'
+              }
+              'subsys2' {
+                  $resource =
+                      'subsysinfo2-infotest2'
+
+                  $configurationFolder =
+                      'SUBSYS2'
+              }
+              
 
               default {
                   throw (
