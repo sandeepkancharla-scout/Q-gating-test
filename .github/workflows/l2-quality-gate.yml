@@ -221,8 +221,7 @@ jobs:
           }
 
           if (
-              $categoryInput -eq
-                  'Diagnostic_Test' -and
+              $categoryInput -eq 'Diagnostic_Test' -and
               -not $ralFile
           ) {
               throw (
@@ -242,41 +241,15 @@ jobs:
               )
           }
 
-          Export-GitHubEnvironmentValue `
-              -Name 'JIRA_KEY' `
-              -Value $jiraKey
-
-          Export-GitHubEnvironmentValue `
-              -Name 'CATEGORY_INPUT' `
-              -Value $categoryInput
-
-          Export-GitHubEnvironmentValue `
-              -Name 'CW_RELEASE' `
-              -Value $cwRelease
-
-          Export-GitHubEnvironmentValue `
-              -Name 'TEST_BENCH' `
-              -Value $testBench
-
-          Export-GitHubEnvironmentValue `
-              -Name 'TARGET_ECU' `
-              -Value $targetEcu
-
-          Export-GitHubEnvironmentValue `
-              -Name 'FLASH_ARCHIVE_LOCATION' `
-              -Value $flashArchive
-
-          Export-GitHubEnvironmentValue `
-              -Name 'RAL_FILE_LOCATION' `
-              -Value $ralFile
-
-          Export-GitHubEnvironmentValue `
-              -Name 'GIT_SUBMODULE' `
-              -Value $gitSubmodule
-
-          Export-GitHubEnvironmentValue `
-              -Name 'TEST_CASES' `
-              -Value $testCases
+          Export-GitHubEnvironmentValue 'JIRA_KEY' $jiraKey
+          Export-GitHubEnvironmentValue 'CATEGORY_INPUT' $categoryInput
+          Export-GitHubEnvironmentValue 'CW_RELEASE' $cwRelease
+          Export-GitHubEnvironmentValue 'TEST_BENCH' $testBench
+          Export-GitHubEnvironmentValue 'TARGET_ECU' $targetEcu
+          Export-GitHubEnvironmentValue 'FLASH_ARCHIVE_LOCATION' $flashArchive
+          Export-GitHubEnvironmentValue 'RAL_FILE_LOCATION' $ralFile
+          Export-GitHubEnvironmentValue 'GIT_SUBMODULE' $gitSubmodule
+          Export-GitHubEnvironmentValue 'TEST_CASES' $testCases
 
           Write-Host ''
           Write-Host '========================================'
@@ -356,8 +329,8 @@ jobs:
 
           if (-not $playbookId) {
               throw (
-                  'The selected TestGuide playbook variable ' +
-                  "is empty for [$env:CATEGORY_INPUT]."
+                  'The selected playbook variable is empty for ' +
+                  "[$env:CATEGORY_INPUT]."
               )
           }
 
@@ -438,21 +411,23 @@ jobs:
                   -Path $workspace `
                   -ChildPath $tcfRelativePath
 
-          $tbcExists =
-              Test-Path `
-                  -LiteralPath $fullTbcPath `
-                  -PathType Leaf
-
-          $tcfExists =
-              Test-Path `
-                  -LiteralPath $fullTcfPath `
-                  -PathType Leaf
-
-          if (-not $tbcExists) {
+          if (
+              -not (
+                  Test-Path `
+                      -LiteralPath $fullTbcPath `
+                      -PathType Leaf
+              )
+          ) {
               throw "TBC does not exist: [$fullTbcPath]"
           }
 
-          if (-not $tcfExists) {
+          if (
+              -not (
+                  Test-Path `
+                      -LiteralPath $fullTcfPath `
+                      -PathType Leaf
+              )
+          ) {
               throw "TCF does not exist: [$fullTcfPath]"
           }
 
@@ -465,13 +440,8 @@ jobs:
                       -LiteralPath $env:RAL_FILE_LOCATION `
                       -PathType Leaf
 
-              Write-Host (
-                  "RAL Path   : [$env:RAL_FILE_LOCATION]"
-              )
-
-              Write-Host (
-                  "RAL Exists : [$ralExists]"
-              )
+              Write-Host "RAL Path   : [$env:RAL_FILE_LOCATION]"
+              Write-Host "RAL Exists : [$ralExists]"
 
               if (-not $ralExists) {
                   throw (
@@ -490,13 +460,8 @@ jobs:
                       -LiteralPath $env:FLASH_ARCHIVE_LOCATION `
                       -PathType Leaf
 
-              Write-Host (
-                  "Flash Path   : [$env:FLASH_ARCHIVE_LOCATION]"
-              )
-
-              Write-Host (
-                  "Flash Exists : [$flashExists]"
-              )
+              Write-Host "Flash Path   : [$env:FLASH_ARCHIVE_LOCATION]"
+              Write-Host "Flash Exists : [$flashExists]"
 
               if (-not $flashExists) {
                   throw (
@@ -526,7 +491,7 @@ jobs:
               Get-Date `
                   -Format 'yyyy-MM-dd_HHmmss'
 
-          $resolvedValues = [ordered]@{
+          $values = [ordered]@{
               CATEGORY =
                   $category
 
@@ -561,10 +526,7 @@ jobs:
                   $runTimestamp
           }
 
-          foreach (
-              $item in
-              $resolvedValues.GetEnumerator()
-          ) {
+          foreach ($item in $values.GetEnumerator()) {
               "$($item.Key)=$($item.Value)" |
                   Out-File `
                       -FilePath $env:GITHUB_ENV `
@@ -604,25 +566,15 @@ jobs:
               $cleanPath =
                   $Path.Trim().Trim('"')
 
-              $escapedPath =
-                  $cleanPath.Replace(
-                      '\',
-                      '\\'
-                  )
-
               return (
                   '"' +
-                  $escapedPath +
+                  $cleanPath.Replace('\', '\\') +
                   '"'
               )
           }
 
           if (-not $env:ONECX_AUTH_KEY) {
               throw 'ONECX_AUTH_KEY is missing.'
-          }
-
-          if (-not $env:ONECX_PROJECT_ID) {
-              throw 'ONECX_PROJECT_ID is missing.'
           }
 
           if (-not $env:TESTGUIDE_PLAYBOOK_ID) {
@@ -664,9 +616,7 @@ jobs:
                           $ralExpression
                   }
 
-              Write-Host (
-                  "RAL expression: [$ralExpression]"
-              )
+              Write-Host "RAL expression: [$ralExpression]"
           }
 
           if (
@@ -686,9 +636,7 @@ jobs:
                           $flashExpression
                   }
 
-              Write-Host (
-                  "Flash expression: [$flashExpression]"
-              )
+              Write-Host "Flash expression: [$flashExpression]"
           }
 
           $headers = @{
@@ -789,9 +737,7 @@ jobs:
                   -Append `
                   -Encoding utf8
 
-          Write-Host (
-              "Execution Task ID: [$taskId]"
-          )
+          Write-Host "Execution Task ID: [$taskId]"
 
       # ============================================================
       # 4. POLL EXECUTION TASK
@@ -1011,7 +957,10 @@ jobs:
           )
 
       # ============================================================
-      # 5. FIND GENERATED REPORT
+      # 5. FIND GENERATED REPORT FOR FULL UTC DAY
+      #
+      # Correct endpoint:
+      # GET /api/report/reports/history
       # ============================================================
 
       - name: Find TestGuide report
@@ -1038,6 +987,14 @@ jobs:
                   'application/json'
           }
 
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'PARSING EXECUTION DATES'
+          Write-Host '========================================'
+          Write-Host "Raw Start : [$env:TASK_START_DATE]"
+          Write-Host "Raw End   : [$env:TASK_END_DATE]"
+          Write-Host '========================================'
+
           try {
               $executionStart =
                   [System.DateTimeOffset]::Parse(
@@ -1062,23 +1019,36 @@ jobs:
               )
           }
 
+          # Search the complete UTC day containing the execution.
+          # The end is exclusive: next day at 00:00:00Z.
+          $executionUtc =
+              $executionStart.ToUniversalTime()
+
+          $dayStart =
+              [System.DateTimeOffset]::new(
+                  $executionUtc.Year,
+                  $executionUtc.Month,
+                  $executionUtc.Day,
+                  0,
+                  0,
+                  0,
+                  [System.TimeSpan]::Zero
+              )
+
+          $dayEnd =
+              $dayStart.AddDays(1)
+
           $historyStart =
-              $executionStart.
-                  AddMinutes(-5).
-                  ToUniversalTime().
-                  ToString(
-                      'yyyy-MM-ddTHH:mm:ss.fffZ',
-                      [System.Globalization.CultureInfo]::InvariantCulture
-                  )
+              $dayStart.ToString(
+                  'yyyy-MM-ddTHH:mm:ssZ',
+                  [System.Globalization.CultureInfo]::InvariantCulture
+              )
 
           $historyEnd =
-              $executionEnd.
-                  AddMinutes(30).
-                  ToUniversalTime().
-                  ToString(
-                      'yyyy-MM-ddTHH:mm:ss.fffZ',
-                      [System.Globalization.CultureInfo]::InvariantCulture
-                  )
+              $dayEnd.ToString(
+                  'yyyy-MM-ddTHH:mm:ssZ',
+                  [System.Globalization.CultureInfo]::InvariantCulture
+              )
 
           $encodedStart =
               [System.Uri]::EscapeDataString(
@@ -1090,8 +1060,9 @@ jobs:
                   $historyEnd
               )
 
+          # Correct API route confirmed from Swagger.
           $historyUrl = (
-              "$env:ONECX_URL/api/v2/report/reports/history" +
+              "$env:ONECX_URL/api/report/reports/history" +
               "?projectId=$env:ONECX_PROJECT_ID" +
               "&startDate=$encodedStart" +
               "&endDate=$encodedEnd" +
@@ -1101,11 +1072,12 @@ jobs:
 
           Write-Host ''
           Write-Host '========================================'
-          Write-Host 'REPORT HISTORY LOOKUP'
+          Write-Host 'FULL-DAY REPORT HISTORY LOOKUP'
           Write-Host '========================================'
           Write-Host "Test Plan : [$env:TEST_PLAN_NAME]"
           Write-Host "Start     : [$historyStart]"
           Write-Host "End       : [$historyEnd]"
+          Write-Host "URL       : [$historyUrl]"
           Write-Host '========================================'
 
           $selectedReport =
@@ -1151,25 +1123,62 @@ jobs:
                   @()
 
               foreach ($report in $matchingReports) {
+                  $parsedExecutionDate =
+                      [System.DateTimeOffset]::MinValue
+
                   $parsedUploadDate =
                       [System.DateTimeOffset]::MinValue
 
-                  if ($report.uploadDate) {
-                      $temporaryDate =
+                  if ($report.executionDate) {
+                      $temporaryExecutionDate =
                           [System.DateTimeOffset]::MinValue
 
-                      $wasParsed =
+                      $executionParsed =
+                          [System.DateTimeOffset]::TryParse(
+                              "$($report.executionDate)",
+                              [System.Globalization.CultureInfo]::InvariantCulture,
+                              [System.Globalization.DateTimeStyles]::AssumeUniversal,
+                              [ref]$temporaryExecutionDate
+                          )
+
+                      if ($executionParsed) {
+                          $parsedExecutionDate =
+                              $temporaryExecutionDate
+                  }
+                  }
+
+                  if ($report.uploadDate) {
+                      $temporaryUploadDate =
+                          [System.DateTimeOffset]::MinValue
+
+                      $uploadParsed =
                           [System.DateTimeOffset]::TryParse(
                               "$($report.uploadDate)",
                               [System.Globalization.CultureInfo]::InvariantCulture,
                               [System.Globalization.DateTimeStyles]::AssumeUniversal,
-                              [ref]$temporaryDate
+                              [ref]$temporaryUploadDate
                           )
 
-                      if ($wasParsed) {
+                      if ($uploadParsed) {
                           $parsedUploadDate =
-                              $temporaryDate
-                      }
+                              $temporaryUploadDate
+                  }
+                  }
+
+                  $differenceSeconds =
+                      :MaxValue
+
+                  if (
+                      $parsedExecutionDate -ne
+                      [System.DateTimeOffset]::MinValue
+                  ) {
+                      $differenceSeconds =
+                          [System.Math]::Abs(
+                              (
+                                  $parsedExecutionDate -
+                                  $executionStart
+                              ).TotalSeconds
+                          )
                   }
 
                   $sortableReports +=
@@ -1177,21 +1186,47 @@ jobs:
                           Report =
                               $report
 
+                          DifferenceSeconds =
+                              $differenceSeconds
+
                           ParsedUploadDate =
                               $parsedUploadDate
                       }
               }
 
+              # Prefer the matching report whose executionDate is
+              # closest to this execution's start time. Upload date
+              # is used as a tiebreaker.
               $selectedWrapper =
                   $sortableReports |
                       Sort-Object `
-                          -Property ParsedUploadDate `
-                          -Descending |
+                          -Property @(
+                              @{
+                                  Expression =
+                                      'DifferenceSeconds'
+
+                                  Ascending =
+                                      $true
+                              },
+                              @{
+                                  Expression =
+                                      'ParsedUploadDate'
+
+                                  Descending =
+                                      $true
+                              }
+                          ) |
                       Select-Object -First 1
 
               if ($null -ne $selectedWrapper) {
                   $selectedReport =
                       $selectedWrapper.Report
+
+                  Write-Host (
+                      'Selected report difference from ' +
+                      'execution start: ' +
+                      "[$($selectedWrapper.DifferenceSeconds)] seconds"
+                  )
 
                   break
               }
@@ -1207,8 +1242,8 @@ jobs:
           if ($null -eq $selectedReport) {
               throw (
                   'No COMPLETE TestGuide report was found for ' +
-                  "[$env:TEST_PLAN_NAME] between " +
-                  "[$historyStart] and [$historyEnd]."
+                  "[$env:TEST_PLAN_NAME] during " +
+                  "[$historyStart] through [$historyEnd]."
               )
           }
 
@@ -1239,6 +1274,8 @@ jobs:
 
       # ============================================================
       # 6. START ATX EXPORT
+      #
+      # Report API uses /api/report, not /api/v2/report.
       # ============================================================
 
       - name: Start ATX export
@@ -1262,10 +1299,12 @@ jobs:
           }
 
           $url = (
-              "$env:ONECX_URL/api/v2/report/export/atx/" +
+              "$env:ONECX_URL/api/report/export/atx/" +
               "$env:TESTGUIDE_REPORT_ID" +
               "?projectId=$env:ONECX_PROJECT_ID"
           )
+
+          Write-Host "ATX export URL: [$url]"
 
           $response =
               Invoke-RestMethod `
@@ -1352,10 +1391,12 @@ jobs:
           }
 
           $url = (
-              "$env:ONECX_URL/api/v2/report/export/atx/" +
+              "$env:ONECX_URL/api/report/export/atx/" +
               "$env:ATX_EXPORT_TASK_ID/status" +
               "?projectId=$env:ONECX_PROJECT_ID"
           )
+
+          Write-Host "ATX status URL: [$url]"
 
           $deadline =
               (Get-Date).AddMinutes(30)
@@ -1449,7 +1490,7 @@ jobs:
           )
 
       # ============================================================
-      # 8. DOWNLOAD ATX
+      # 8. DOWNLOAD GENERATED ATX
       # ============================================================
 
       - name: Download generated ATX
@@ -1469,10 +1510,12 @@ jobs:
           }
 
           $url = (
-              "$env:ONECX_URL/api/v2/report/export/atx/" +
+              "$env:ONECX_URL/api/report/export/atx/" +
               "$env:ATX_EXPORT_TASK_ID/download" +
               "?projectId=$env:ONECX_PROJECT_ID"
           )
+
+          Write-Host "ATX download URL: [$url]"
 
           $fileName = (
               "$env:TEST_PLAN_NAME" +
@@ -1515,9 +1558,13 @@ jobs:
                   -Append `
                   -Encoding utf8
 
-          Write-Host (
-              "ATX downloaded: [$destination]"
-          )
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'ATX DOWNLOAD COMPLETE'
+          Write-Host '========================================'
+          Write-Host "File : [$destination]"
+          Write-Host "Size : [$($file.Length)] bytes"
+          Write-Host '========================================'
 
       # ============================================================
       # 9. BUILD JFROG DESTINATION
