@@ -826,8 +826,7 @@ jobs:
               'TestGuide-AuthKey' =
                   $env:ONECX_AUTH_KEY
 
-              Accept =
-                  'application/json'
+
           }
 
           $createUrl = (
