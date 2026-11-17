@@ -28,6 +28,7 @@ jobs:
       cancel-in-progress: false
 
     steps:
+
       # ============================================================
       # 1. PARSE JIRA INPUTS
       # ============================================================
@@ -76,29 +77,14 @@ jobs:
                   $result.StartsWith('"') -and
                   $result.EndsWith('"')
               ) {
-                  $result = $result.Substring(
-                      1,
-                      $result.Length - 2
-                  ).Trim()
+                  $result =
+                      $result.Substring(
+                          1,
+                          $result.Length - 2
+                      ).Trim()
               }
 
               return $result
-          }
-
-          function Set-GitHubEnvironmentValue {
-              param(
-                  [Parameter(Mandatory = $true)]
-                  [string]$Name,
-
-                  [AllowEmptyString()]
-                  [string]$Value
-              )
-
-              "$Name=$Value" |
-                  Out-File `
-                      -FilePath $env:GITHUB_ENV `
-                      -Append `
-                      -Encoding utf8
           }
 
           $jiraKey =
@@ -140,18 +126,6 @@ jobs:
               throw 'category is missing.'
           }
 
-          if (-not $cwRelease) {
-              throw 'cw_release is missing.'
-          }
-
-          if (-not $testBench) {
-              throw 'test_bench is missing.'
-          }
-
-          if (-not $targetEcu) {
-              throw 'target_ecu is missing.'
-          }
-
           if ($cwRelease -notmatch '^CW[0-9]{2}$') {
               throw "Invalid CW release: $cwRelease"
           }
@@ -165,7 +139,12 @@ jobs:
               throw "Unsupported Test Bench: $testBench"
           }
 
+          if (-not $targetEcu) {
+              throw 'target_ecu is missing.'
+          }
+
           switch ($categoryInput.ToLowerInvariant()) {
+
               'network_test' {
                   $categoryInput =
                       'Network_Test'
@@ -220,41 +199,43 @@ jobs:
               )
           }
 
-          Set-GitHubEnvironmentValue `
-              -Name 'JIRA_KEY' `
-              -Value $jiraKey
+          $values = [ordered]@{
+              JIRA_KEY =
+                  $jiraKey
 
-          Set-GitHubEnvironmentValue `
-              -Name 'CATEGORY_INPUT' `
-              -Value $categoryInput
+              CATEGORY_INPUT =
+                  $categoryInput
 
-          Set-GitHubEnvironmentValue `
-              -Name 'CW_RELEASE' `
-              -Value $cwRelease
+              CW_RELEASE =
+                  $cwRelease
 
-          Set-GitHubEnvironmentValue `
-              -Name 'TEST_BENCH' `
-              -Value $testBench
+              TEST_BENCH =
+                  $testBench
 
-          Set-GitHubEnvironmentValue `
-              -Name 'TARGET_ECU' `
-              -Value $targetEcu
+              TARGET_ECU =
+                  $targetEcu
 
-          Set-GitHubEnvironmentValue `
-              -Name 'FLASH_ARCHIVE_LOCATION' `
-              -Value $flashArchive
+              FLASH_ARCHIVE_LOCATION =
+                  $flashArchive
 
-          Set-GitHubEnvironmentValue `
-              -Name 'RAL_FILE_LOCATION' `
-              -Value $ralFile
+              RAL_FILE_LOCATION =
+                  $ralFile
 
-          Set-GitHubEnvironmentValue `
-              -Name 'GIT_SUBMODULE' `
-              -Value $gitSubmodule
+              GIT_SUBMODULE =
+                  $gitSubmodule
 
-          Set-GitHubEnvironmentValue `
-              -Name 'TEST_CASES' `
-              -Value $testCases
+              TEST_CASES =
+                  $testCases
+          }
+
+          foreach ($item in $values.GetEnumerator()) {
+
+              "$($item.Key)=$($item.Value)" |
+                  Out-File `
+                      -FilePath $env:GITHUB_ENV `
+                      -Append `
+                      -Encoding utf8
+          }
 
           Write-Host ''
           Write-Host '========================================'
@@ -300,7 +281,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           switch ($env:CATEGORY_INPUT) {
+
               'Network_Test' {
+
                   $category =
                       'network-testing'
 
@@ -315,6 +298,7 @@ jobs:
               }
 
               'Diagnostic_Test' {
+
                   $category =
                       'diagnostic-testing'
 
@@ -329,6 +313,7 @@ jobs:
               }
 
               'Bootloader_Compliance_Test' {
+
                   $category =
                       'bootloader-compliance'
 
@@ -343,6 +328,7 @@ jobs:
               }
 
               default {
+
                   throw (
                       "Unsupported category: " +
                       "$env:CATEGORY_INPUT"
@@ -351,7 +337,9 @@ jobs:
           }
 
           switch ($env:TEST_BENCH) {
+
               'syshil1' {
+
                   $resource =
                       'syshil1-labtest1'
 
@@ -360,6 +348,7 @@ jobs:
               }
 
               'syshil2' {
+
                   $resource =
                       'syshil2-labtest2'
 
@@ -368,6 +357,7 @@ jobs:
               }
 
               default {
+
                   throw (
                       "Unsupported bench: " +
                       "$env:TEST_BENCH"
@@ -394,6 +384,7 @@ jobs:
                   -PathType Container
 
           if (-not $sourceExists) {
+
               throw (
                   "Source repository is missing: " +
                   "$sourceRepository"
@@ -426,10 +417,8 @@ jobs:
                   -LiteralPath $fullProjectPath `
                   -PathType Leaf
 
-          Write-Host "Project path   : [$fullProjectPath]"
-          Write-Host "Project exists : [$projectExists]"
-
           if (-not $projectExists) {
+
               throw (
                   "Project does not exist: " +
                   "$fullProjectPath"
@@ -480,6 +469,7 @@ jobs:
               $env:CATEGORY_INPUT -eq
               'Diagnostic_Test'
           ) {
+
               $ralExists =
                   Test-Path `
                       -LiteralPath $env:RAL_FILE_LOCATION `
@@ -494,6 +484,7 @@ jobs:
               )
 
               if (-not $ralExists) {
+
                   throw (
                       "RAL file does not exist: " +
                       "$env:RAL_FILE_LOCATION"
@@ -505,6 +496,7 @@ jobs:
               $env:CATEGORY_INPUT -eq
               'Bootloader_Compliance_Test'
           ) {
+
               $flashExists =
                   Test-Path `
                       -LiteralPath $env:FLASH_ARCHIVE_LOCATION `
@@ -519,6 +511,7 @@ jobs:
               )
 
               if (-not $flashExists) {
+
                   throw (
                       "Bootloader file does not exist: " +
                       "$env:FLASH_ARCHIVE_LOCATION"
@@ -547,6 +540,7 @@ jobs:
                   -Format 'yyyy-MM-dd_HHmmss'
 
           $resolvedValues = [ordered]@{
+
               CATEGORY =
                   $category
 
@@ -588,6 +582,7 @@ jobs:
               $item in
               $resolvedValues.GetEnumerator()
           ) {
+
               "$($item.Key)=$($item.Value)" |
                   Out-File `
                       -FilePath $env:GITHUB_ENV `
@@ -617,6 +612,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           function Convert-ToEcuTestPathExpression {
+
               param(
                   [Parameter(Mandatory = $true)]
                   [string]$Path
@@ -645,7 +641,9 @@ jobs:
           )
 
           $constants = @(
+
               [ordered]@{
+
                   label =
                       'PROJECT_GENERATOR_TARGETECU'
 
@@ -654,6 +652,7 @@ jobs:
               },
 
               [ordered]@{
+
                   label =
                       'PROJECT_GENERATOR_CT'
 
@@ -663,7 +662,9 @@ jobs:
           )
 
           $parameters = @(
+
               [ordered]@{
+
                   label =
                       'PROJECT_GENERATOR_TARGETECU'
 
@@ -675,6 +676,7 @@ jobs:
               },
 
               [ordered]@{
+
                   label =
                       'PROJECT_GENERATOR_CT'
 
@@ -690,11 +692,13 @@ jobs:
               $env:CATEGORY_INPUT -eq
               'Diagnostic_Test'
           ) {
+
               $ralExpression =
                   Convert-ToEcuTestPathExpression `
                       -Path $env:RAL_FILE_LOCATION
 
               $constants += [ordered]@{
+
                   label =
                       'PROJECT_GENERATOR_RAL_FILE_PATH'
 
@@ -703,6 +707,7 @@ jobs:
               }
 
               $parameters += [ordered]@{
+
                   label =
                       'PROJECT_GENERATOR_RAL_FILE_PATH'
 
@@ -722,11 +727,13 @@ jobs:
               $env:CATEGORY_INPUT -eq
               'Bootloader_Compliance_Test'
           ) {
+
               $hexExpression =
                   Convert-ToEcuTestPathExpression `
                       -Path $env:FLASH_ARCHIVE_LOCATION
 
               $constants += [ordered]@{
+
                   label =
                       'PROJECT_GENERATOR_BL_COMPLIANCE_FILE_PATH'
 
@@ -735,6 +742,7 @@ jobs:
               }
 
               $parameters += [ordered]@{
+
                   label =
                       'PROJECT_GENERATOR_BL_COMPLIANCE_FILE_PATH'
 
@@ -751,7 +759,9 @@ jobs:
           }
 
           $playbook = [ordered]@{
+
               metadata = [ordered]@{
+
                   name = (
                       "$env:PLAYBOOK_NAME-" +
                       "$env:JIRA_KEY-" +
@@ -766,7 +776,9 @@ jobs:
               }
 
               workspace = [ordered]@{
+
                   source = [ordered]@{
+
                       path =
                           $env:TESTGUIDE_WORKSPACE
 
@@ -779,8 +791,11 @@ jobs:
               }
 
               setup = [ordered]@{
+
                   steps = @(
+
                       [ordered]@{
+
                           reuse =
                               'always'
 
@@ -798,6 +813,7 @@ jobs:
                       },
 
                       [ordered]@{
+
                           tbcPath =
                               $env:TBC_RELATIVE_PATH
 
@@ -814,8 +830,11 @@ jobs:
               }
 
               execution = [ordered]@{
+
                   testcases = @(
+
                       [ordered]@{
+
                           relativePath =
                               $env:PROJECT_RELATIVE_PATH
 
@@ -832,8 +851,11 @@ jobs:
               }
 
               teardown = [ordered]@{
+
                   steps = @(
+
                       [ordered]@{
+
                           type =
                               'ecuTestStop'
                       }
@@ -841,7 +863,9 @@ jobs:
               }
 
               xilConfigRequirements = @(
+
                   [ordered]@{
+
                       label =
                           'Identifier'
 
@@ -877,7 +901,9 @@ jobs:
                   -Append `
                   -Encoding utf8
 
-          Write-Host "Playbook file: [$playbookFile]"
+          Write-Host (
+              "Playbook file: [$playbookFile]"
+          )
 
       # ============================================================
       # 5. CREATE TESTGUIDE PLAYBOOK
@@ -900,6 +926,7 @@ jobs:
           }
 
           $headers = @{
+
               'TestGuide-AuthKey' =
                   $env:ONECX_AUTH_KEY
 
@@ -941,19 +968,23 @@ jobs:
               $null
 
           if ($response.playbookId) {
+
               $playbookId =
                   $response.playbookId
           }
           elseif ($response.id) {
+
               $playbookId =
                   $response.id
           }
           elseif ($response.data) {
+
               $playbookId =
                   $response.data.id
           }
 
           if (-not $playbookId) {
+
               Write-Host (
                   $response |
                       ConvertTo-Json -Depth 30
@@ -971,7 +1002,9 @@ jobs:
                   -Append `
                   -Encoding utf8
 
-          Write-Host "Playbook ID: [$playbookId]"
+          Write-Host (
+              "Playbook ID: [$playbookId]"
+          )
 
       # ============================================================
       # 6. EXECUTE TESTGUIDE PLAYBOOK
@@ -986,6 +1019,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           function Convert-ToEcuTestPathExpression {
+
               param(
                   [Parameter(Mandatory = $true)]
                   [string]$Path
@@ -1002,7 +1036,9 @@ jobs:
           }
 
           $executionParameters = @(
+
               [ordered]@{
+
                   label =
                       'PROJECT_GENERATOR_TARGETECU'
 
@@ -1011,6 +1047,7 @@ jobs:
               },
 
               [ordered]@{
+
                   label =
                       'PROJECT_GENERATOR_CT'
 
@@ -1023,7 +1060,9 @@ jobs:
               $env:CATEGORY_INPUT -eq
               'Diagnostic_Test'
           ) {
+
               $executionParameters += [ordered]@{
+
                   label =
                       'PROJECT_GENERATOR_RAL_FILE_PATH'
 
@@ -1038,7 +1077,9 @@ jobs:
               $env:CATEGORY_INPUT -eq
               'Bootloader_Compliance_Test'
           ) {
+
               $executionParameters += [ordered]@{
+
                   label =
                       'PROJECT_GENERATOR_BL_COMPLIANCE_FILE_PATH'
 
@@ -1050,6 +1091,7 @@ jobs:
           }
 
           $headers = @{
+
               'TestGuide-AuthKey' =
                   $env:ONECX_AUTH_KEY
 
@@ -1065,6 +1107,7 @@ jobs:
           )
 
           $requestBody = @{
+
               parameters =
                   $executionParameters
           } |
@@ -1098,14 +1141,17 @@ jobs:
               $null
 
           if ($response.taskIds) {
+
               $taskId =
                   @($response.taskIds)[0]
           }
           elseif ($response.taskId) {
+
               $taskId =
                   $response.taskId
           }
           elseif ($response.id) {
+
               $taskId =
                   $response.id
           }
@@ -1113,6 +1159,7 @@ jobs:
               $response.data -and
               $response.data.taskIds
           ) {
+
               $taskId =
                   @($response.data.taskIds)[0]
           }
@@ -1120,11 +1167,13 @@ jobs:
               $response.data -and
               $response.data.taskId
           ) {
+
               $taskId =
                   $response.data.taskId
           }
 
           if (-not $taskId) {
+
               throw (
                   'Execute TestGuide API returned ' +
                   'no task ID.'
@@ -1137,13 +1186,22 @@ jobs:
                   -Append `
                   -Encoding utf8
 
-          Write-Host "Task ID: [$taskId]"
+          Write-Host (
+              "Execution Task ID: [$taskId]"
+          )
 
       # ============================================================
-      # 7. POLL EVERY 15 SECONDS
+      # 7. POLL EXECUTION TASK
+      #
+      # Swagger:
+      # GET /task/{taskId}
+      #
+      # IMPORTANT:
+      # - Execution task, NOT flow task
+      # - No fields= filtering
       # ============================================================
 
-      - name: Wait for TestGuide execution
+      - name: Wait for TestGuide execution task
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
@@ -1152,14 +1210,17 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           if (-not $env:ONECX_AUTH_KEY) {
+
               throw 'ONECX_AUTH_KEY is missing.'
           }
 
           if (-not $env:TESTGUIDE_TASK_ID) {
+
               throw 'TESTGUIDE_TASK_ID is missing.'
           }
 
           $headers = @{
+
               'TestGuide-AuthKey' =
                   $env:ONECX_AUTH_KEY
 
@@ -1167,17 +1228,15 @@ jobs:
                   'application/json'
           }
 
+          # Execution Task endpoint:
+          #
+          # GET /task/{taskId}
+          #
+          # Do not add fields=.
           $taskUrl = (
               "$env:ONECX_URL/api/v2/execution/task/" +
               "$env:TESTGUIDE_TASK_ID" +
-              "?projectId=$env:ONECX_PROJECT_ID" +
-              "&fields=taskId" +
-              "&fields=startDate" +
-              "&fields=endDate" +
-              "&fields=state" +
-              "&fields=stateInfo" +
-              "&fields=aggregatedVerdict" +
-              "&fields=abortedByUser"
+              "?projectId=$env:ONECX_PROJECT_ID"
           )
 
           $completedStates = @(
@@ -1203,223 +1262,66 @@ jobs:
           $attempt =
               0
 
-          $emptyStateAttempts =
-              0
+          $pollDeadline =
+              (Get-Date).AddMinutes(180)
 
           Write-Host ''
           Write-Host '========================================'
-          Write-Host 'TESTGUIDE EXECUTION POLLING'
+          Write-Host 'EXECUTION TASK POLLING'
           Write-Host '========================================'
           Write-Host "Playbook ID   : [$env:TESTGUIDE_PLAYBOOK_ID]"
           Write-Host "Task ID       : [$env:TESTGUIDE_TASK_ID]"
+          Write-Host "Polling URL   : [$taskUrl]"
           Write-Host 'Poll interval : 15 seconds'
           Write-Host '========================================'
 
-          while ($true) {
+          while ((Get-Date) -lt $pollDeadline) {
+
               $attempt++
 
-              $response =
+              $task =
                   Invoke-RestMethod `
                       -Method Get `
                       -Uri $taskUrl `
                       -Headers $headers `
                       -ErrorAction Stop
 
-              # Resolve the actual task from different possible
-              # TestGuide response shapes.
-              $task =
-                  $null
+              if ($attempt -eq 1) {
 
-              if ($null -ne $response.items) {
-                  $task =
-                      @($response.items) |
-                          Where-Object {
-                              "$($_.taskId)" -eq
-                              "$env:TESTGUIDE_TASK_ID"
-                          } |
-                          Select-Object -First 1
+                  Write-Host ''
+                  Write-Host 'FULL EXECUTION TASK RESPONSE:'
 
-                  if ($null -eq $task) {
-                      $task =
-                          @($response.items) |
-                              Select-Object -First 1
-                  }
-              }
-              elseif ($null -ne $response.tasks) {
-                  $task =
-                      @($response.tasks) |
-                          Where-Object {
-                              "$($_.taskId)" -eq
-                              "$env:TESTGUIDE_TASK_ID"
-                          } |
-                          Select-Object -First 1
-
-                  if ($null -eq $task) {
-                      $task =
-                          @($response.tasks) |
-                              Select-Object -First 1
-                  }
-              }
-              elseif (
-                  $null -ne $response.data -and
-                  $null -ne $response.data.items
-              ) {
-                  $task =
-                      @($response.data.items) |
-                          Where-Object {
-                              "$($_.taskId)" -eq
-                              "$env:TESTGUIDE_TASK_ID"
-                          } |
-                          Select-Object -First 1
-
-                  if ($null -eq $task) {
-                      $task =
-                          @($response.data.items) |
-                              Select-Object -First 1
-                  }
-              }
-              elseif ($null -ne $response.data) {
-                  $task =
-                      $response.data
-              }
-              elseif ($response -is [System.Array]) {
-                  $task =
-                      @($response) |
-                          Where-Object {
-                              "$($_.taskId)" -eq
-                              "$env:TESTGUIDE_TASK_ID"
-                          } |
-                          Select-Object -First 1
-
-                  if ($null -eq $task) {
-                      $task =
-                          @($response) |
-                              Select-Object -First 1
-                  }
-              }
-              else {
-                  $task =
-                      $response
-              }
-
-              if ($null -eq $task) {
-                  throw (
-                      'TestGuide returned no task object. ' +
-                      "Task ID=$env:TESTGUIDE_TASK_ID"
+                  Write-Host (
+                      $task |
+                          ConvertTo-Json -Depth 30
                   )
+
+                  Write-Host ''
               }
 
               $state =
-                  "$($task.state)".Trim()
-
-              if (
-                  -not $state -and
-                  $null -ne $task.status
-              ) {
-                  if ($task.status -is [string]) {
-                      $state =
-                          "$($task.status)".Trim()
-                  }
-                  elseif (
-                      $null -ne
-                      $task.status.state
-                  ) {
-                      $state =
-                          "$($task.status.state)".Trim()
-                  }
-              }
-
-              if (
-                  -not $state -and
-                  $null -ne $task.executionState
-              ) {
-                  $state =
-                      "$($task.executionState)".Trim()
-              }
-
-              $state =
-                  $state.ToUpperInvariant()
+                  "$($task.state)".
+                      Trim().
+                      ToUpperInvariant()
 
               $verdict =
-                  "$($task.aggregatedVerdict)".Trim()
-
-              if (
-                  -not $verdict -and
-                  $null -ne $task.verdict
-              ) {
-                  $verdict =
-                      "$($task.verdict)".Trim()
-              }
-
-              if (
-                  -not $verdict -and
-                  $null -ne $task.result
-              ) {
-                  if ($task.result -is [string]) {
-                      $verdict =
-                          "$($task.result)".Trim()
-                  }
-                  elseif (
-                      $null -ne
-                      $task.result.aggregatedVerdict
-                  ) {
-                      $verdict =
-                          "$($task.result.aggregatedVerdict)".Trim()
-                  }
-                  elseif (
-                      $null -ne
-                      $task.result.verdict
-                  ) {
-                      $verdict =
-                          "$($task.result.verdict)".Trim()
-                  }
-              }
-
-              $verdict =
-                  $verdict.ToUpperInvariant()
+                  "$($task.aggregatedVerdict)".
+                      Trim().
+                      ToUpperInvariant()
 
               $stateInfo =
-                  "$($task.stateInfo)".Trim()
-
-              if (
-                  -not $stateInfo -and
-                  $null -ne $task.message
-              ) {
-                  $stateInfo =
-                      "$($task.message)".Trim()
-              }
-
-              if (
-                  -not $stateInfo -and
-                  $null -ne $task.errorMessage
-              ) {
-                  $stateInfo =
-                      "$($task.errorMessage)".Trim()
-              }
+                  "$($task.stateInfo)".
+                      Trim()
 
               $startDate =
-                  "$($task.startDate)".Trim()
-
-              if (
-                  -not $startDate -and
-                  $null -ne $task.startedAt
-              ) {
-                  $startDate =
-                      "$($task.startedAt)".Trim()
-              }
+                  "$($task.startDate)".
+                      Trim()
 
               $endDate =
-                  "$($task.endDate)".Trim()
+                  "$($task.endDate)".
+                      Trim()
 
-              if (
-                  -not $endDate -and
-                  $null -ne $task.finishedAt
-              ) {
-                  $endDate =
-                      "$($task.finishedAt)".Trim()
-              }
-
-              # CT-style output.
+              # Same style as CT-execution.yml
               Write-Host (
                   "Attempt=$attempt " +
                   "State=$state " +
@@ -1427,12 +1329,13 @@ jobs:
               )
 
               if ($stateInfo) {
+
                   Write-Host (
                       "StateInfo=$stateInfo"
                   )
               }
 
-              $response |
+              $task |
                   ConvertTo-Json -Depth 30 |
                   Set-Content `
                       -LiteralPath (
@@ -1442,47 +1345,30 @@ jobs:
                       ) `
                       -Encoding utf8
 
-              # Empty state protection.
+              # Do not silently poll forever if even the complete
+              # execution-task representation contains no state.
               if (-not $state) {
-                  $emptyStateAttempts++
 
-                  Write-Warning (
-                      'TestGuide returned an empty task state. ' +
-                      "Empty attempt=$emptyStateAttempts."
+                  Write-Host ''
+                  Write-Host 'EXECUTION TASK RESPONSE HAS NO STATE:'
+
+                  Write-Host (
+                      $task |
+                          ConvertTo-Json -Depth 30
                   )
 
-                  if ($emptyStateAttempts -eq 1) {
-                      Write-Host ''
-                      Write-Host 'Raw TestGuide response:'
-
-                      Write-Host (
-                          $response |
-                              ConvertTo-Json -Depth 30
-                      )
-
-                      Write-Host ''
-                  }
-
-                  if ($emptyStateAttempts -ge 3) {
-                      throw (
-                          'TestGuide returned an empty task state ' +
-                          'three consecutive times. Inspect ' +
-                          'task-latest.json and the raw response. ' +
-                          "Task ID=$env:TESTGUIDE_TASK_ID"
-                      )
-                  }
-
-                  Start-Sleep -Seconds 15
-
-                  continue
+                  throw (
+                      'GET execution task returned no state. ' +
+                      "Task ID=$env:TESTGUIDE_TASK_ID"
+                  )
               }
 
-              $emptyStateAttempts =
-                  0
+              # ----------------------------------------------------
+              # ABORTED / ERROR / FAILED / CANCELLED
+              # ----------------------------------------------------
 
-              # Failure must be checked before endDate because
-              # failed/aborted tasks can also have an endDate.
               if ($state -in $failedStates) {
+
                   $safeStateInfo =
                       (
                           $stateInfo -replace
@@ -1491,8 +1377,9 @@ jobs:
                       ).Trim()
 
                   if (-not $safeStateInfo) {
+
                       $safeStateInfo =
-                          "TestGuide ended with state $state."
+                          "TestGuide execution ended with state $state."
                   }
 
                   "TASK_START_DATE=$startDate" |
@@ -1543,7 +1430,7 @@ jobs:
 
                   Write-Host ''
                   Write-Host '========================================'
-                  Write-Host 'TESTGUIDE EXECUTION ENDED'
+                  Write-Host 'EXECUTION TASK ENDED'
                   Write-Host '========================================'
                   Write-Host "Attempt=$attempt"
                   Write-Host "State=$state"
@@ -1558,10 +1445,15 @@ jobs:
                   )
               }
 
+              # ----------------------------------------------------
+              # FINISHED / COMPLETED
+              # ----------------------------------------------------
+
               if (
                   ($state -in $completedStates) -or
                   $endDate
               ) {
+
                   $safeStateInfo =
                       (
                           $stateInfo -replace
@@ -1570,6 +1462,7 @@ jobs:
                       ).Trim()
 
                   if (-not $endDate) {
+
                       $endDate =
                           Get-Date -Format 'o'
                   }
@@ -1622,7 +1515,7 @@ jobs:
 
                   Write-Host ''
                   Write-Host '========================================'
-                  Write-Host 'TESTGUIDE EXECUTION COMPLETE'
+                  Write-Host 'EXECUTION TASK COMPLETE'
                   Write-Host '========================================'
                   Write-Host "Attempt=$attempt"
                   Write-Host "State=$state"
@@ -1634,11 +1527,20 @@ jobs:
                   exit 0
               }
 
+              # ----------------------------------------------------
+              # RUNNING / QUEUED / BLOCKED
+              # ----------------------------------------------------
+
               Start-Sleep -Seconds 15
           }
 
+          throw (
+              'Execution-task polling exceeded 180 minutes. ' +
+              "Task ID=$env:TESTGUIDE_TASK_ID"
+          )
+
       # ============================================================
-      # 8. DISPLAY FINAL STATE
+      # 8. DISPLAY FINAL EXECUTION TASK STATE
       # ============================================================
 
       - name: Display final TestGuide state
@@ -1648,14 +1550,13 @@ jobs:
         run: |
           Write-Host ''
           Write-Host '========================================'
-          Write-Host 'FINAL TESTGUIDE STATE'
+          Write-Host 'FINAL TESTGUIDE EXECUTION TASK'
           Write-Host '========================================'
           Write-Host "Playbook ID : $env:TESTGUIDE_PLAYBOOK_ID"
           Write-Host "Task ID     : $env:TESTGUIDE_TASK_ID"
           Write-Host "State       : $env:TESTGUIDE_STATE"
           Write-Host "Verdict     : $env:TESTGUIDE_VERDICT"
           Write-Host "Message     : $env:TESTGUIDE_MESSAGE"
-          Write-Host "Completed   : $env:TESTGUIDE_EXECUTION_COMPLETE"
           Write-Host '========================================'
 
       # ============================================================
@@ -1672,14 +1573,17 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           if (-not $env:TASK_START_DATE) {
+
               throw 'TASK_START_DATE is missing.'
           }
 
           if (-not $env:TASK_END_DATE) {
+
               throw 'TASK_END_DATE is missing.'
           }
 
           $headers = @{
+
               'TestGuide-AuthKey' =
                   $env:ONECX_AUTH_KEY
 
@@ -1699,10 +1603,12 @@ jobs:
                   -ErrorAction Stop
 
           if ($depositoryResponse.items) {
+
               $depositories =
                   @($depositoryResponse.items)
           }
           else {
+
               $depositories =
                   @($depositoryResponse)
           }
@@ -1731,10 +1637,12 @@ jobs:
               0
 
           foreach ($depository in $depositories) {
+
               $depositoryId =
                   "$($depository.id)"
 
               if (-not $depositoryId) {
+
                   continue
               }
 
@@ -1746,6 +1654,7 @@ jobs:
               )
 
               try {
+
                   $artifactResponse =
                       Invoke-RestMethod `
                           -Method Get `
@@ -1754,6 +1663,7 @@ jobs:
                           -ErrorAction Stop
               }
               catch {
+
                   Write-Warning (
                       "Could not search depository: " +
                       "$depositoryId"
@@ -1763,15 +1673,18 @@ jobs:
               }
 
               if ($artifactResponse.items) {
+
                   $artifacts =
                       @($artifactResponse.items)
               }
               else {
+
                   $artifacts =
                       @($artifactResponse)
               }
 
               foreach ($artifact in $artifacts) {
+
                   $fileName =
                       "$($artifact.fileName)"
 
@@ -1784,6 +1697,7 @@ jobs:
                       $extension -ne 'atx' -and
                       $fileName -notmatch '(?i)\.atx$'
                   ) {
+
                       continue
                   }
 
@@ -1791,10 +1705,12 @@ jobs:
                       "$($artifact.id)"
 
                   if (-not $artifactId) {
+
                       continue
                   }
 
                   if (-not $fileName) {
+
                       $fileName =
                           "$artifactId.atx"
                   }
@@ -1819,6 +1735,7 @@ jobs:
                           -LiteralPath $destination
 
                   if ($downloadedFile.Length -eq 0) {
+
                       throw (
                           "Downloaded ATX is empty: " +
                           "$fileName"
@@ -1826,8 +1743,7 @@ jobs:
                   }
 
                   Write-Host (
-                      "ATX downloaded: " +
-                      "$destination"
+                      "ATX downloaded: [$destination]"
                   )
 
                   $downloadCount++
@@ -1835,6 +1751,7 @@ jobs:
           }
 
           if ($downloadCount -eq 0) {
+
               throw (
                   'Execution completed, but no ATX ' +
                   'report was found.'
