@@ -514,7 +514,7 @@ jobs:
 
           Write-Host ''
           Write-Host '========================================'
-          Write-Host 'NEW PLAYBOOK CONFIGURATION'
+          Write-Host 'PLAYBOOK CONFIGURATION'
           Write-Host '========================================'
           Write-Host "Category      : $category"
           Write-Host "Test Plan     : $testPlanName"
@@ -525,7 +525,7 @@ jobs:
           Write-Host '========================================'
 
       # ============================================================
-      # 3. GENERATE NEW PLAYBOOK
+      # 3. GENERATE PLAYBOOK
       # ============================================================
 
       - name: Generate new TestGuide playbook
@@ -544,7 +544,10 @@ jobs:
                   $Path.Trim().Trim('"')
 
               $escapedPath =
-                  $cleanPath.Replace('\', '\\')
+                  $cleanPath.Replace(
+                      '\',
+                      '\\'
+                  )
 
               return (
                   '"' +
@@ -553,11 +556,8 @@ jobs:
               )
           }
 
-          $targetEcuExpression = (
-              "'" +
-              $env:TARGET_ECU +
-              "'"
-          )
+          $targetEcuExpression =
+              "'" + $env:TARGET_ECU + "'"
 
           $constants = @(
               [ordered]@{
@@ -661,112 +661,123 @@ jobs:
                   }
           }
 
-          $playbook = [ordered]@{
-              metadata = [ordered]@{
-                  name =
-                      $env:PLAYBOOK_NAME
-
-                  taskNameTemplate =
-                      '${playbook_name} (${playbook_datetime}) ${distribution_count}'
-
-                  labels =
-                      @()
-              }
-
-              workspace = [ordered]@{
-                  source = [ordered]@{
-                      path =
-                          $env:TESTGUIDE_WORKSPACE
-
-                      sourceType =
-                          'location'
-                  }
-
-                  dependencies =
-                      @()
-              }
-
-              setup = [ordered]@{
-                  steps = @(
+          $playbook =
+              [ordered]@{
+                  metadata =
                       [ordered]@{
-                          reuse =
-                              'always'
+                          name =
+                              $env:PLAYBOOK_NAME
 
-                          keepConfiguration =
-                              $false
+                          taskNameTemplate =
+                              '${playbook_name} (${playbook_datetime}) ${distribution_count}'
 
-                          waitMinutesForLicense =
-                              0
-
-                          stepName =
-                              "ecu.test $env:RESOURCE_NAME Start"
-
-                          type =
-                              'ecuTestStart'
-                      },
-
-                      [ordered]@{
-                          tbcPath =
-                              $env:TBC_RELATIVE_PATH
-
-                          tcfPath =
-                              $env:TCF_RELATIVE_PATH
-
-                          stepName =
-                              'Test Configuration Selection'
-
-                          type =
-                              'configuration'
+                          labels =
+                              @()
                       }
-                  )
-              }
 
-              execution = [ordered]@{
-                  testcases = @(
+                  workspace =
                       [ordered]@{
-                          relativePath =
-                              $env:PROJECT_RELATIVE_PATH
+                          source =
+                              [ordered]@{
+                                  path =
+                                      $env:TESTGUIDE_WORKSPACE
 
-                          constants =
-                              $constants
+                                  sourceType =
+                                      'location'
+                              }
 
-                          stepName =
-                              "ecu.test $env:RESOURCE_NAME Start"
-
-                          type =
-                              'project'
+                          dependencies =
+                              @()
                       }
-                  )
-              }
 
-              teardown = [ordered]@{
-                  steps = @(
+                  setup =
                       [ordered]@{
-                          type =
-                              'ecuTestStop'
+                          steps =
+                              @(
+                                  [ordered]@{
+                                      reuse =
+                                          'always'
+
+                                      keepConfiguration =
+                                          $false
+
+                                      waitMinutesForLicense =
+                                          0
+
+                                      stepName =
+                                          "ecu.test $env:RESOURCE_NAME Start"
+
+                                      type =
+                                          'ecuTestStart'
+                                  },
+
+                                  [ordered]@{
+                                      tbcPath =
+                                          $env:TBC_RELATIVE_PATH
+
+                                      tcfPath =
+                                          $env:TCF_RELATIVE_PATH
+
+                                      stepName =
+                                          'Test Configuration Selection'
+
+                                      type =
+                                          'configuration'
+                                  }
+                              )
                       }
-                  )
+
+                  execution =
+                      [ordered]@{
+                          testcases =
+                              @(
+                                  [ordered]@{
+                                      relativePath =
+                                          $env:PROJECT_RELATIVE_PATH
+
+                                      constants =
+                                          $constants
+
+                                      stepName =
+                                          "ecu.test $env:RESOURCE_NAME Start"
+
+                                      type =
+                                          'project'
+                                  }
+                              )
+                      }
+
+                  teardown =
+                      [ordered]@{
+                          steps =
+                              @(
+                                  [ordered]@{
+                                      type =
+                                          'ecuTestStop'
+                                  }
+                              )
+                      }
+
+                  xilConfigRequirements =
+                      @(
+                          [ordered]@{
+                              label =
+                                  'Identifier'
+
+                              category =
+                                  'XIL'
+
+                              value =
+                                  $env:XIL_IDENTIFIER
+
+                              type =
+                                  'configuration'
+                          }
+                      )
+
+                  parameters =
+                      $parameters
               }
-
-              xilConfigRequirements = @(
-                  [ordered]@{
-                      label =
-                          'Identifier'
-
-                      category =
-                          'XIL'
-
-                      value =
-                          $env:XIL_IDENTIFIER
-
-                      type =
-                          'configuration'
-                  }
-              )
-
-              parameters =
-                  $parameters
-          }
 
           $playbookFile =
               Join-Path `
@@ -890,7 +901,7 @@ jobs:
                   -Append `
                   -Encoding utf8
 
-          Write-Host "Playbook ID: $newPlaybookId"
+          Write-Host "Created Playbook ID: $newPlaybookId"
 
       # ============================================================
       # 5. EXECUTE PLAYBOOK
@@ -910,12 +921,9 @@ jobs:
                   [string]$Path
               )
 
-              $cleanPath =
-                  $Path.Trim().Trim('"')
-
               return (
                   '"' +
-                  $cleanPath.Replace('\', '\\') +
+                  $Path.Trim().Trim('"').Replace('\', '\\') +
                   '"'
               )
           }
@@ -951,10 +959,9 @@ jobs:
                       label =
                           'PROJECT_GENERATOR_RAL_FILE_PATH'
 
-                      value = (
+                      value =
                           Convert-ToEcuTestPathExpression `
                               -Path $env:RAL_FILE_LOCATION
-                      )
                   }
           }
 
@@ -967,10 +974,9 @@ jobs:
                       label =
                           'PROJECT_GENERATOR_BL_COMPLIANCE_FILE_PATH'
 
-                      value = (
+                      value =
                           Convert-ToEcuTestPathExpression `
                               -Path $env:FLASH_ARCHIVE_LOCATION
-                      )
                   }
           }
 
@@ -989,11 +995,12 @@ jobs:
               "&checkLastExecution=true"
           )
 
-          $requestBody = @{
-              parameters =
-                  $executionParameters
-          } |
-              ConvertTo-Json -Depth 20
+          $requestBody =
+              @{
+                  parameters =
+                      $executionParameters
+              } |
+                  ConvertTo-Json -Depth 20
 
           $executeResponse =
               Invoke-RestMethod `
@@ -1015,14 +1022,11 @@ jobs:
                   -Encoding utf8
 
           Write-Host ''
-          Write-Host '========================================'
           Write-Host 'RAW EXECUTE RESPONSE'
-          Write-Host '========================================'
           Write-Host (
               $executeResponse |
                   ConvertTo-Json -Depth 30
           )
-          Write-Host '========================================'
 
           $executionTaskId =
               $null
@@ -1066,7 +1070,6 @@ jobs:
                   -Append `
                   -Encoding utf8
 
-          Write-Host ''
           Write-Host "Execution Task ID: $executionTaskId"
 
       # ============================================================
@@ -1083,10 +1086,6 @@ jobs:
 
           if (-not $env:TESTGUIDE_TASK_ID) {
               throw 'TESTGUIDE_TASK_ID is missing.'
-          }
-
-          if (-not $env:TESTGUIDE_PLAYBOOK_ID) {
-              throw 'TESTGUIDE_PLAYBOOK_ID is missing.'
           }
 
           $headers = @{
@@ -1139,7 +1138,7 @@ jobs:
           Write-Host "Project ID  : $env:ONECX_PROJECT_ID"
           Write-Host "Playbook ID : $env:TESTGUIDE_PLAYBOOK_ID"
           Write-Host "Task ID     : $env:TESTGUIDE_TASK_ID"
-          Write-Host "Polling URL : $taskUrl"
+          Write-Host "URL         : $taskUrl"
           Write-Host '========================================'
 
           while ((Get-Date) -lt $deadline) {
@@ -1165,23 +1164,20 @@ jobs:
                           [int]$_.Exception.Response.StatusCode
                   }
 
-                  Write-Host ''
                   Write-Host (
-                      "Execution polling failed. " +
+                      "Polling error. " +
                       "Attempt=$attempt " +
-                      "StatusCode=$statusCode"
+                      "HTTP=$statusCode " +
+                      "Error=$($_.Exception.Message)"
                   )
-                  Write-Host "URL=$taskUrl"
-                  Write-Host "Error=$($_.Exception.Message)"
 
                   if ($statusCode -eq 404) {
                       $notFoundCount++
 
                       if ($notFoundCount -le 20) {
                           Write-Host (
-                              "Task not available yet. " +
-                              "404 count=$notFoundCount/20. " +
-                              "Waiting 15 seconds..."
+                              "Task currently returns 404. " +
+                              "Retry=$notFoundCount/20"
                           )
 
                           Start-Sleep -Seconds 15
@@ -1199,16 +1195,12 @@ jobs:
                           -LiteralPath $executeResponseFile
                   ) {
                       Write-Host ''
-                      Write-Host '========================================'
-                      Write-Host 'RAW EXECUTE RESPONSE'
-                      Write-Host '========================================'
+                      Write-Host 'RAW EXECUTE RESPONSE:'
 
                       Get-Content `
                           -LiteralPath $executeResponseFile `
                           -Raw |
                           Write-Host
-
-                      Write-Host '========================================'
                   }
 
                   throw
@@ -1236,9 +1228,7 @@ jobs:
               Write-Host (
                   "Attempt=$attempt " +
                   "State=$state " +
-                  "Verdict=$verdict " +
-                  "Start=$startDate " +
-                  "End=$endDate"
+                  "Verdict=$verdict"
               )
 
               $task |
@@ -1258,7 +1248,7 @@ jobs:
                   )
 
                   throw (
-                      'Execution-task API returned no state.'
+                      'Execution task API returned no state.'
                   )
               }
 
@@ -1282,14 +1272,9 @@ jobs:
                           -Append `
                           -Encoding utf8
 
-                  "TESTGUIDE_MESSAGE=$safeStateInfo" |
-                      Out-File `
-                          -FilePath $env:GITHUB_ENV `
-                          -Append `
-                          -Encoding utf8
-
                   throw (
-                      "Execution ended. State=$state; " +
+                      "Execution ended. " +
+                      "State=$state; " +
                       "Message=$safeStateInfo"
                   )
               }
@@ -1339,7 +1324,7 @@ jobs:
 
                   Write-Host ''
                   Write-Host '========================================'
-                  Write-Host 'PLAYBOOK EXECUTION COMPLETE'
+                  Write-Host 'EXECUTION COMPLETE'
                   Write-Host '========================================'
                   Write-Host "State   : $state"
                   Write-Host "Verdict : $verdict"
@@ -1391,18 +1376,19 @@ jobs:
           catch {
               throw (
                   'Unable to parse TASK_START_DATE. ' +
-                  "Value=[$env:TASK_START_DATE]; " +
+                  "Value=[$env:TASK_START_DATE]. " +
                   "Error=$($_.Exception.Message)"
               )
           }
 
+          $dayStartText =
+              $executionStart.ToString(
+                  'yyyy-MM-ddT00:00:00Z'
+              )
+
           $dayStart =
               Get-Date `
-                  -Date (
-                      $executionStart.ToString(
-                          'yyyy-MM-ddT00:00:00Z'
-                      )
-                  )
+                  -Date $dayStartText
 
           $dayEnd =
               $dayStart.AddDays(1)
@@ -1461,9 +1447,6 @@ jobs:
                       -Headers $headers `
                       -ErrorAction Stop
 
-              $allReports =
-                  @()
-
               if ($null -eq $historyResponse) {
                   $allReports =
                       @()
@@ -1501,18 +1484,20 @@ jobs:
                   @(
                       $allReports |
                           Where-Object {
-                              $status =
+                              $reportStatus =
                                   "$($_.status)".
                                       Trim().
                                       ToUpperInvariant()
 
-                              $plan =
+                              $reportPlan =
                                   "$($_.testPlanName)".
                                       Trim()
 
                               (
-                                  $status -eq 'COMPLETE' -and
-                                  $plan -eq
+                                  $reportStatus -eq
+                                      'COMPLETE' -and
+
+                                  $reportPlan -eq
                                       $env:TEST_PLAN_NAME
                               )
                           }
@@ -1520,7 +1505,6 @@ jobs:
 
               Write-Host (
                   "Report lookup attempt=$attempt " +
-                  "Total=$($allReports.Count) " +
                   "Matching=$($matchingReports.Count)"
               )
 
@@ -1529,12 +1513,12 @@ jobs:
                       foreach (
                           $report in $matchingReports
                       ) {
-                          # Safe fallback value.
-                          # No PositiveInfinity is used.
+                          # Safe large fallback.
+                          # No PositiveInfinity.
                           $differenceSeconds =
                               999999999999999
 
-                          $reportUploadDate =
+                          $uploadDate =
                               Get-Date `
                                   -Date '1900-01-01T00:00:00Z'
 
@@ -1561,7 +1545,7 @@ jobs:
                               }
                               catch {
                                   Write-Host (
-                                      'Unable to parse report ' +
+                                      'Could not parse ' +
                                       'executionDate: ' +
                                       "$($report.executionDate)"
                                   )
@@ -1570,7 +1554,7 @@ jobs:
 
                           if ($report.uploadDate) {
                               try {
-                                  $reportUploadDate =
+                                  $uploadDate =
                                       Get-Date `
                                           -Date (
                                               "$($report.uploadDate)"
@@ -1579,7 +1563,7 @@ jobs:
                               }
                               catch {
                                   Write-Host (
-                                      'Unable to parse report ' +
+                                      'Could not parse ' +
                                       'uploadDate: ' +
                                       "$($report.uploadDate)"
                                   )
@@ -1590,11 +1574,11 @@ jobs:
                               Report =
                                   $report
 
-                              DifferenceSeconds =
+                              Difference =
                                   $differenceSeconds
 
                               UploadDate =
-                                  $reportUploadDate
+                                  $uploadDate
                           }
                       }
 
@@ -1604,7 +1588,7 @@ jobs:
                               -Property @(
                                   @{
                                       Expression =
-                                          'DifferenceSeconds'
+                                          'Difference'
 
                                       Ascending =
                                           $true
@@ -1619,13 +1603,13 @@ jobs:
                               ) |
                           Select-Object -First 1
 
-                  if ($selectedWrapper) {
+                  if ($null -ne $selectedWrapper) {
                       $selectedReport =
                           $selectedWrapper.Report
 
                       Write-Host (
                           'Selected report difference: ' +
-                          "$($selectedWrapper.DifferenceSeconds) seconds"
+                          "$($selectedWrapper.Difference) seconds"
                       )
 
                       break
@@ -1634,7 +1618,7 @@ jobs:
 
               if ($attempt -lt 20) {
                   Write-Host (
-                      'No matching COMPLETE report yet. ' +
+                      'Matching report not available yet. ' +
                       'Waiting 15 seconds...'
                   )
 
@@ -1659,14 +1643,18 @@ jobs:
                       ConvertTo-Json -Depth 30
               )
 
-              throw 'Selected report contains no reportId.'
+              throw (
+                  'Selected report contains no reportId.'
+              )
           }
 
           $reportId =
-              "$reportId".Trim()
+              ([string]$reportId).Trim()
 
           if (-not $reportId) {
-              throw 'Selected report contains empty reportId.'
+              throw (
+                  'Selected report contains an empty reportId.'
+              )
           }
 
           "TESTGUIDE_REPORT_ID=$reportId" |
@@ -1775,8 +1763,7 @@ jobs:
                   -Append `
                   -Encoding utf8
 
-          Write-Host ''
-          Write-Host "ATX export task ID: $exportTaskId"
+          Write-Host "ATX Export Task ID: $exportTaskId"
 
       # ============================================================
       # 9. POLL ATX EXPORT
@@ -1844,7 +1831,7 @@ jobs:
 
               if ($response -is [string]) {
                   $responseJson =
-                      "$response"
+                      [string]$response
               }
               else {
                   $responseJson =
@@ -1908,7 +1895,7 @@ jobs:
 
                   throw (
                       'ATX status contains invalid done value. ' +
-                      "Value=[$doneText]; " +
+                      "Value=[$doneText]. " +
                       "Response=$responseJson"
                   )
               }
@@ -1937,7 +1924,7 @@ jobs:
 
               if ($state -in $successStates) {
                   Write-Host (
-                      "ATX EXPORT COMPLETE. State=$state"
+                      "ATX export complete. State=$state"
                   )
 
                   exit 0
@@ -1945,7 +1932,8 @@ jobs:
 
               if ($state -in $failureStates) {
                   throw (
-                      "ATX export failed. State=$state; " +
+                      "ATX export failed. " +
+                      "State=$state. " +
                       "Response=$responseJson"
                   )
               }
@@ -1979,12 +1967,16 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
+          if (-not $env:ATX_EXPORT_TASK_ID) {
+              throw 'ATX_EXPORT_TASK_ID is missing.'
+          }
+
           $headers = @{
               'TestGuide-AuthKey' =
                   $env:ONECX_AUTH_KEY
 
               Accept =
-                  'application/json'
+                  'application/octet-stream'
           }
 
           $downloadUrl = (
@@ -2041,8 +2033,9 @@ jobs:
                   -Encoding utf8
 
           Write-Host ''
-          Write-Host "Downloaded ATX: $destination"
-          Write-Host "Size: $($file.Length) bytes"
+          Write-Host 'ATX DOWNLOAD COMPLETE'
+          Write-Host "File : $destination"
+          Write-Host "Size : $($file.Length) bytes"
 
       # ============================================================
       # 11. BUILD JFROG DESTINATION
@@ -2073,7 +2066,9 @@ jobs:
                   $safe.Trim('.')
 
               if (-not $safe) {
-                  throw "Invalid JFrog segment: [$Value]"
+                  throw (
+                      "Invalid JFrog segment: [$Value]"
+                  )
               }
 
               return $safe
@@ -2215,10 +2210,12 @@ jobs:
                   -Append `
                   -Encoding utf8
 
-          Write-Host "JFrog ATX URL: $uploadUrl"
+          Write-Host ''
+          Write-Host 'JFROG UPLOAD COMPLETE'
+          Write-Host "ATX URL: $uploadUrl"
 
       # ============================================================
-      # 13. UPDATE JIRA
+      # 13. ADD ATX LOCATION TO JIRA
       # ============================================================
 
       - name: Add ATX location to Jira
@@ -2308,10 +2305,12 @@ jobs:
               )
           }
 
-          Write-Host "Jira comment added to $env:JIRA_KEY."
+          Write-Host (
+              "Jira comment added to $env:JIRA_KEY."
+          )
 
       # ============================================================
-      # 14. UPLOAD DIAGNOSTICS
+      # 14. RETAIN ATX AND DIAGNOSTICS
       # ============================================================
 
       - name: Upload ATX and diagnostics to GitHub
