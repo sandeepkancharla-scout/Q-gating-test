@@ -34,7 +34,6 @@ jobs:
       cancel-in-progress: false
 
     steps:
-
       # ============================================================
       # 1. PARSE JIRA INPUTS
       # ============================================================
@@ -525,7 +524,7 @@ jobs:
           Write-Host '========================================'
 
       # ============================================================
-      # 3. GENERATE PLAYBOOK
+      # 3. GENERATE PLAYBOOK JSON
       # ============================================================
 
       - name: Generate new TestGuide playbook
@@ -661,123 +660,112 @@ jobs:
                   }
           }
 
-          $playbook =
-              [ordered]@{
-                  metadata =
-                      [ordered]@{
-                          name =
-                              $env:PLAYBOOK_NAME
+          $playbook = [ordered]@{
+              metadata = [ordered]@{
+                  name =
+                      $env:PLAYBOOK_NAME
 
-                          taskNameTemplate =
-                              '${playbook_name} (${playbook_datetime}) ${distribution_count}'
+                  taskNameTemplate =
+                      '${playbook_name} (${playbook_datetime}) ${distribution_count}'
 
-                          labels =
-                              @()
-                      }
-
-                  workspace =
-                      [ordered]@{
-                          source =
-                              [ordered]@{
-                                  path =
-                                      $env:TESTGUIDE_WORKSPACE
-
-                                  sourceType =
-                                      'location'
-                              }
-
-                          dependencies =
-                              @()
-                      }
-
-                  setup =
-                      [ordered]@{
-                          steps =
-                              @(
-                                  [ordered]@{
-                                      reuse =
-                                          'always'
-
-                                      keepConfiguration =
-                                          $false
-
-                                      waitMinutesForLicense =
-                                          0
-
-                                      stepName =
-                                          "ecu.test $env:RESOURCE_NAME Start"
-
-                                      type =
-                                          'ecuTestStart'
-                                  },
-
-                                  [ordered]@{
-                                      tbcPath =
-                                          $env:TBC_RELATIVE_PATH
-
-                                      tcfPath =
-                                          $env:TCF_RELATIVE_PATH
-
-                                      stepName =
-                                          'Test Configuration Selection'
-
-                                      type =
-                                          'configuration'
-                                  }
-                              )
-                      }
-
-                  execution =
-                      [ordered]@{
-                          testcases =
-                              @(
-                                  [ordered]@{
-                                      relativePath =
-                                          $env:PROJECT_RELATIVE_PATH
-
-                                      constants =
-                                          $constants
-
-                                      stepName =
-                                          "ecu.test $env:RESOURCE_NAME Start"
-
-                                      type =
-                                          'project'
-                                  }
-                              )
-                      }
-
-                  teardown =
-                      [ordered]@{
-                          steps =
-                              @(
-                                  [ordered]@{
-                                      type =
-                                          'ecuTestStop'
-                                  }
-                              )
-                      }
-
-                  xilConfigRequirements =
-                      @(
-                          [ordered]@{
-                              label =
-                                  'Identifier'
-
-                              category =
-                                  'XIL'
-
-                              value =
-                                  $env:XIL_IDENTIFIER
-
-                              type =
-                                  'configuration'
-                          }
-                      )
-
-                  parameters =
-                      $parameters
+                  labels =
+                      @()
               }
+
+              workspace = [ordered]@{
+                  source = [ordered]@{
+                      path =
+                          $env:TESTGUIDE_WORKSPACE
+
+                      sourceType =
+                          'location'
+                  }
+
+                  dependencies =
+                      @()
+              }
+
+              setup = [ordered]@{
+                  steps = @(
+                      [ordered]@{
+                          reuse =
+                              'always'
+
+                          keepConfiguration =
+                              $false
+
+                          waitMinutesForLicense =
+                              0
+
+                          stepName =
+                              "ecu.test $env:RESOURCE_NAME Start"
+
+                          type =
+                              'ecuTestStart'
+                      },
+
+                      [ordered]@{
+                          tbcPath =
+                              $env:TBC_RELATIVE_PATH
+
+                          tcfPath =
+                              $env:TCF_RELATIVE_PATH
+
+                          stepName =
+                              'Test Configuration Selection'
+
+                          type =
+                              'configuration'
+                      }
+                  )
+              }
+
+              execution = [ordered]@{
+                  testcases = @(
+                      [ordered]@{
+                          relativePath =
+                              $env:PROJECT_RELATIVE_PATH
+
+                          constants =
+                              $constants
+
+                          stepName =
+                              "ecu.test $env:RESOURCE_NAME Start"
+
+                          type =
+                              'project'
+                      }
+                  )
+              }
+
+              teardown = [ordered]@{
+                  steps = @(
+                      [ordered]@{
+                          type =
+                              'ecuTestStop'
+                      }
+                  )
+              }
+
+              xilConfigRequirements = @(
+                  [ordered]@{
+                      label =
+                          'Identifier'
+
+                      category =
+                          'XIL'
+
+                      value =
+                          $env:XIL_IDENTIFIER
+
+                      type =
+                          'configuration'
+                  }
+              )
+
+              parameters =
+                  $parameters
+          }
 
           $playbookFile =
               Join-Path `
@@ -826,7 +814,8 @@ jobs:
               'TestGuide-AuthKey' =
                   $env:ONECX_AUTH_KEY
 
-
+              Accept =
+                  'application/json'
           }
 
           $createUrl = (
@@ -958,9 +947,10 @@ jobs:
                       label =
                           'PROJECT_GENERATOR_RAL_FILE_PATH'
 
-                      value =
+                      value = (
                           Convert-ToEcuTestPathExpression `
                               -Path $env:RAL_FILE_LOCATION
+                      )
                   }
           }
 
@@ -973,9 +963,10 @@ jobs:
                       label =
                           'PROJECT_GENERATOR_BL_COMPLIANCE_FILE_PATH'
 
-                      value =
+                      value = (
                           Convert-ToEcuTestPathExpression `
                               -Path $env:FLASH_ARCHIVE_LOCATION
+                      )
                   }
           }
 
@@ -1271,6 +1262,12 @@ jobs:
                           -Append `
                           -Encoding utf8
 
+                  "TESTGUIDE_MESSAGE=$safeStateInfo" |
+                      Out-File `
+                          -FilePath $env:GITHUB_ENV `
+                          -Append `
+                          -Encoding utf8
+
                   throw (
                       "Execution ended. " +
                       "State=$state; " +
@@ -1512,8 +1509,6 @@ jobs:
                       foreach (
                           $report in $matchingReports
                       ) {
-                          # Safe large fallback.
-                          # No PositiveInfinity.
                           $differenceSeconds =
                               999999999999999
 
@@ -1955,10 +1950,15 @@ jobs:
           throw 'ATX export polling exceeded 30 minutes.'
 
       # ============================================================
-      # 10. DOWNLOAD GENERATED ATX
+      # 10. DOWNLOAD ATX ZIP TO WINDOWS RUNNER
+      #
+      # Confirmed by TestGuide Swagger:
+      # GET /api/report/export/atx/{taskId}/download
+      # Accept: application/zip
+      # No projectId query parameter
       # ============================================================
 
-      - name: Download generated ATX
+      - name: Download ATX ZIP to runner
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
@@ -1966,8 +1966,30 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
+          if (-not $env:ONECX_AUTH_KEY) {
+              throw 'ONECX_AUTH_KEY is missing.'
+          }
+
           if (-not $env:ATX_EXPORT_TASK_ID) {
               throw 'ATX_EXPORT_TASK_ID is missing.'
+          }
+
+          if (-not $env:ATX_DIRECTORY) {
+              throw 'ATX_DIRECTORY is missing.'
+          }
+
+          if (
+              -not (
+                  Test-Path `
+                      -LiteralPath $env:ATX_DIRECTORY `
+                      -PathType Container
+              )
+          ) {
+              New-Item `
+                  -ItemType Directory `
+                  -Path $env:ATX_DIRECTORY `
+                  -Force |
+                  Out-Null
           }
 
           $headers = @{
@@ -1980,8 +2002,7 @@ jobs:
 
           $downloadUrl = (
               "$env:ONECX_URL/api/report/export/atx/" +
-              "$env:ATX_EXPORT_TASK_ID/download" +
-              "?projectId=$env:ONECX_PROJECT_ID"
+              "$env:ATX_EXPORT_TASK_ID/download"
           )
 
           $safeTargetEcu =
@@ -1989,52 +2010,109 @@ jobs:
                   '[\\/:*?"<>|]',
                   '_'
 
-          $fileName = (
+          $zipFileName = (
               "$env:TEST_PLAN_NAME" +
               "_" +
               "$safeTargetEcu" +
               "_" +
               "$env:RUN_TIMESTAMP" +
-              ".atx"
+              ".zip"
           )
 
-          $destination =
+          $zipFilePath =
               Join-Path `
                   -Path $env:ATX_DIRECTORY `
-                  -ChildPath $fileName
+                  -ChildPath $zipFileName
 
-          Invoke-WebRequest `
-              -Method Get `
-              -Uri $downloadUrl `
-              -Headers $headers `
-              -OutFile $destination `
-              -ErrorAction Stop
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'TESTGUIDE -> WINDOWS RUNNER'
+          Write-Host '========================================'
+          Write-Host "Export Task ID : $env:ATX_EXPORT_TASK_ID"
+          Write-Host "Download URL   : $downloadUrl"
+          Write-Host 'Accept         : application/zip'
+          Write-Host "Runner path    : $zipFilePath"
+          Write-Host '========================================'
 
-          $file =
-              Get-Item `
-                  -LiteralPath $destination `
+          try {
+              Invoke-WebRequest `
+                  -Method Get `
+                  -Uri $downloadUrl `
+                  -Headers $headers `
+                  -OutFile $zipFilePath `
                   -ErrorAction Stop
+          }
+          catch {
+              $statusCode =
+                  $null
 
-          if ($file.Length -le 0) {
-              throw 'Downloaded ATX file is empty.'
+              if (
+                  $_.Exception.Response -and
+                  $_.Exception.Response.StatusCode
+              ) {
+                  $statusCode =
+                      [int]$_.Exception.Response.StatusCode
+              }
+
+              Write-Host ''
+              Write-Host '========================================'
+              Write-Host 'ATX ZIP DOWNLOAD FAILED'
+              Write-Host '========================================'
+              Write-Host "HTTP Status : $statusCode"
+              Write-Host "Task ID     : $env:ATX_EXPORT_TASK_ID"
+              Write-Host "URL         : $downloadUrl"
+              Write-Host 'Accept      : application/zip'
+              Write-Host "Error       : $($_.Exception.Message)"
+              Write-Host '========================================'
+
+              throw
           }
 
-          "ATX_FILE_PATH=$destination" |
+          if (
+              -not (
+                  Test-Path `
+                      -LiteralPath $zipFilePath `
+                      -PathType Leaf
+              )
+          ) {
+              throw (
+                  'TestGuide download completed but ZIP ' +
+                  "was not created on runner: [$zipFilePath]"
+              )
+          }
+
+          $zipFile =
+              Get-Item `
+                  -LiteralPath $zipFilePath `
+                  -ErrorAction Stop
+
+          if ($zipFile.Length -le 0) {
+              throw (
+                  'Downloaded ATX ZIP is empty. ' +
+                  "Path=[$zipFilePath]"
+              )
+          }
+
+          "ATX_FILE_PATH=$zipFilePath" |
               Out-File `
                   -FilePath $env:GITHUB_ENV `
                   -Append `
                   -Encoding utf8
 
-          "ATX_FILE_NAME=$fileName" |
+          "ATX_FILE_NAME=$zipFileName" |
               Out-File `
                   -FilePath $env:GITHUB_ENV `
                   -Append `
                   -Encoding utf8
 
           Write-Host ''
-          Write-Host 'ATX DOWNLOAD COMPLETE'
-          Write-Host "File : $destination"
-          Write-Host "Size : $($file.Length) bytes"
+          Write-Host '========================================'
+          Write-Host 'ATX ZIP STORED ON RUNNER'
+          Write-Host '========================================'
+          Write-Host "Path : $zipFilePath"
+          Write-Host "Name : $zipFileName"
+          Write-Host "Size : $($zipFile.Length) bytes"
+          Write-Host '========================================'
 
       # ============================================================
       # 11. BUILD JFROG DESTINATION
@@ -2108,13 +2186,18 @@ jobs:
                   -Append `
                   -Encoding utf8
 
-          Write-Host "JFrog target: $targetPath"
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'JFROG DESTINATION'
+          Write-Host '========================================'
+          Write-Host "Target: $targetPath"
+          Write-Host '========================================'
 
       # ============================================================
-      # 12. UPLOAD ATX TO JFROG
+      # 12. UPLOAD RUNNER ZIP TO JFROG
       # ============================================================
 
-      - name: Upload generated ATX to JFrog
+      - name: Upload ATX ZIP from runner to JFrog
         shell: pwsh
         env:
           JFROG_USER: ${{ secrets.JFROG_USER }}
@@ -2131,10 +2214,44 @@ jobs:
               throw 'ATX_FILE_PATH is missing.'
           }
 
+          if (-not $env:JFROG_TARGET_PATH) {
+              throw 'JFROG_TARGET_PATH is missing.'
+          }
+
+          if (
+              -not (
+                  Test-Path `
+                      -LiteralPath $env:ATX_FILE_PATH `
+                      -PathType Leaf
+              )
+          ) {
+              throw (
+                  'ATX ZIP does not exist on runner: ' +
+                  "[$env:ATX_FILE_PATH]"
+              )
+          }
+
           $file =
               Get-Item `
                   -LiteralPath $env:ATX_FILE_PATH `
                   -ErrorAction Stop
+
+          if ($file.Length -le 0) {
+              throw (
+                  'ATX ZIP on runner is empty: ' +
+                  "[$($file.FullName)]"
+              )
+          }
+
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'WINDOWS RUNNER -> JFROG'
+          Write-Host '========================================'
+          Write-Host "Runner file : $($file.FullName)"
+          Write-Host "File name   : $($file.Name)"
+          Write-Host "File size   : $($file.Length) bytes"
+          Write-Host "JFrog path  : $env:JFROG_TARGET_PATH"
+          Write-Host '========================================'
 
           $segments =
               $env:JFROG_TARGET_PATH.
@@ -2161,6 +2278,8 @@ jobs:
               "$encodedFileName"
           )
 
+          Write-Host "JFrog upload URL: $uploadUrl"
+
           if ($env:JFROG_USER) {
               curl.exe `
                   --fail-with-body `
@@ -2168,7 +2287,7 @@ jobs:
                   --show-error `
                   --request PUT `
                   --user "$($env:JFROG_USER):$($env:JFROG_TOKEN)" `
-                  --header 'Content-Type: application/octet-stream' `
+                  --header 'Content-Type: application/zip' `
                   --upload-file "$($file.FullName)" `
                   "$uploadUrl"
           }
@@ -2179,7 +2298,7 @@ jobs:
                   --show-error `
                   --request PUT `
                   --header "Authorization: Bearer $env:JFROG_TOKEN" `
-                  --header 'Content-Type: application/octet-stream' `
+                  --header 'Content-Type: application/zip' `
                   --upload-file "$($file.FullName)" `
                   "$uploadUrl"
           }
@@ -2210,14 +2329,18 @@ jobs:
                   -Encoding utf8
 
           Write-Host ''
+          Write-Host '========================================'
           Write-Host 'JFROG UPLOAD COMPLETE'
-          Write-Host "ATX URL: $uploadUrl"
+          Write-Host '========================================'
+          Write-Host "Source : $($file.FullName)"
+          Write-Host "Target : $uploadUrl"
+          Write-Host '========================================'
 
       # ============================================================
-      # 13. ADD ATX LOCATION TO JIRA
+      # 13. ADD JFROG LOCATION TO JIRA
       # ============================================================
 
-      - name: Add ATX location to Jira
+      - name: Add ATX ZIP location to Jira
         shell: pwsh
         env:
           JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
@@ -2258,7 +2381,8 @@ jobs:
               "Execution Verdict: $env:TESTGUIDE_VERDICT`n" +
               "Report ID: $env:TESTGUIDE_REPORT_ID`n" +
               "ATX Export Task ID: $env:ATX_EXPORT_TASK_ID`n`n" +
-              "JFrog ATX file:`n" +
+              "Runner ZIP file: $env:ATX_FILE_PATH`n`n" +
+              "JFrog ATX ZIP file:`n" +
               "$env:JFROG_FILE_URL`n`n" +
               "JFrog folder:`n" +
               "$env:JFROG_FOLDER_URL`n`n" +
@@ -2309,10 +2433,10 @@ jobs:
           )
 
       # ============================================================
-      # 14. RETAIN ATX AND DIAGNOSTICS
+      # 14. RETAIN ZIP AND DIAGNOSTICS IN GITHUB
       # ============================================================
 
-      - name: Upload ATX and diagnostics to GitHub
+      - name: Upload ATX ZIP and diagnostics to GitHub
         if: always()
         uses: actions/upload-artifact@v4
         with:
