@@ -34,6 +34,7 @@ jobs:
       cancel-in-progress: false
 
     steps:
+
       # ============================================================
       # 1. PARSE JIRA INPUTS
       # ============================================================
@@ -177,19 +178,23 @@ jobs:
 
           switch ($categoryInput.ToLowerInvariant()) {
               'network_test' {
-                  $categoryInput = 'Network_Test'
+                  $categoryInput =
+                      'Network_Test'
               }
 
               'network_testing' {
-                  $categoryInput = 'Network_Test'
+                  $categoryInput =
+                      'Network_Test'
               }
 
               'diagnostic_test' {
-                  $categoryInput = 'Diagnostic_Test'
+                  $categoryInput =
+                      'Diagnostic_Test'
               }
 
               'diagnostic_testing' {
-                  $categoryInput = 'Diagnostic_Test'
+                  $categoryInput =
+                      'Diagnostic_Test'
               }
 
               'bootloader_compliance_test' {
@@ -524,7 +529,7 @@ jobs:
           Write-Host '========================================'
 
       # ============================================================
-      # 3. GENERATE PLAYBOOK JSON
+      # 3. GENERATE PLAYBOOK
       # ============================================================
 
       - name: Generate new TestGuide playbook
@@ -1012,11 +1017,14 @@ jobs:
                   -Encoding utf8
 
           Write-Host ''
+          Write-Host '========================================'
           Write-Host 'RAW EXECUTE RESPONSE'
+          Write-Host '========================================'
           Write-Host (
               $executeResponse |
                   ConvertTo-Json -Depth 30
           )
+          Write-Host '========================================'
 
           $executionTaskId =
               $null
@@ -1338,6 +1346,11 @@ jobs:
 
       # ============================================================
       # 7. FIND REPORT
+      #
+      # IMPORTANT:
+      # Prints ALL reports returned by TestGuide before filtering.
+      # This will show why DiagnosticTest gets Matching=0.
+      # Bootloader and Network matching remain unchanged.
       # ============================================================
 
       - name: Find TestGuide report
@@ -1350,6 +1363,10 @@ jobs:
 
           if (-not $env:TASK_START_DATE) {
               throw 'TASK_START_DATE is missing.'
+          }
+
+          if (-not $env:TEST_PLAN_NAME) {
+              throw 'TEST_PLAN_NAME is missing.'
           }
 
           $headers = @{
@@ -1422,7 +1439,9 @@ jobs:
           Write-Host '========================================'
           Write-Host 'FULL-DAY REPORT HISTORY LOOKUP'
           Write-Host '========================================'
+          Write-Host "Category  : $env:CATEGORY_INPUT"
           Write-Host "Test Plan : $env:TEST_PLAN_NAME"
+          Write-Host "Task ID   : $env:TESTGUIDE_TASK_ID"
           Write-Host "Start     : $historyStart"
           Write-Host "End       : $historyEnd"
           Write-Host "URL       : $historyUrl"
@@ -1448,6 +1467,7 @@ jobs:
                       @()
               }
               elseif (
+                  $null -ne
                   $historyResponse.PSObject.Properties[
                       'content'
                   ]
@@ -1456,6 +1476,7 @@ jobs:
                       @($historyResponse.content)
               }
               elseif (
+                  $null -ne
                   $historyResponse.PSObject.Properties[
                       'reports'
                   ]
@@ -1464,6 +1485,7 @@ jobs:
                       @($historyResponse.reports)
               }
               elseif (
+                  $null -ne
                   $historyResponse.PSObject.Properties[
                       'data'
                   ]
@@ -1475,6 +1497,41 @@ jobs:
                   $allReports =
                       @($historyResponse)
               }
+
+              # ----------------------------------------------------
+              # DEBUG: show everything before filtering.
+              # ----------------------------------------------------
+
+              Write-Host ''
+              Write-Host '========================================'
+              Write-Host "REPORTS RETURNED - ATTEMPT $attempt"
+              Write-Host '========================================'
+              Write-Host "Expected Test Plan : [$env:TEST_PLAN_NAME]"
+              Write-Host "Total Reports      : $($allReports.Count)"
+              Write-Host '----------------------------------------'
+
+              if ($allReports.Count -eq 0) {
+                  Write-Host (
+                      'NO REPORTS RETURNED BY REPORT HISTORY API'
+                  )
+              }
+              else {
+                  foreach ($candidate in $allReports) {
+                      Write-Host (
+                          "ReportId=[$($candidate.reportId)] " +
+                          "Status=[$($candidate.status)] " +
+                          "TestPlan=[$($candidate.testPlanName)] " +
+                          "ExecutionDate=[$($candidate.executionDate)] " +
+                          "UploadDate=[$($candidate.uploadDate)]"
+                      )
+                  }
+              }
+
+              Write-Host '========================================'
+
+              # ----------------------------------------------------
+              # Keep existing strict match for now.
+              # ----------------------------------------------------
 
               $matchingReports =
                   @(
@@ -1539,8 +1596,7 @@ jobs:
                               }
                               catch {
                                   Write-Host (
-                                      'Could not parse ' +
-                                      'executionDate: ' +
+                                      'Could not parse executionDate: ' +
                                       "$($report.executionDate)"
                                   )
                               }
@@ -1557,8 +1613,7 @@ jobs:
                               }
                               catch {
                                   Write-Host (
-                                      'Could not parse ' +
-                                      'uploadDate: ' +
+                                      'Could not parse uploadDate: ' +
                                       "$($report.uploadDate)"
                                   )
                               }
@@ -1951,11 +2006,6 @@ jobs:
 
       # ============================================================
       # 10. DOWNLOAD ATX ZIP TO WINDOWS RUNNER
-      #
-      # Confirmed by TestGuide Swagger:
-      # GET /api/report/export/atx/{taskId}/download
-      # Accept: application/zip
-      # No projectId query parameter
       # ============================================================
 
       - name: Download ATX ZIP to runner
@@ -2000,6 +2050,8 @@ jobs:
                   'application/zip'
           }
 
+          # Swagger-confirmed download form.
+          # No projectId query parameter here.
           $downloadUrl = (
               "$env:ONECX_URL/api/report/export/atx/" +
               "$env:ATX_EXPORT_TASK_ID/download"
@@ -2194,7 +2246,7 @@ jobs:
           Write-Host '========================================'
 
       # ============================================================
-      # 12. UPLOAD RUNNER ZIP TO JFROG
+      # 12. UPLOAD ZIP FROM WINDOWS RUNNER TO JFROG
       # ============================================================
 
       - name: Upload ATX ZIP from runner to JFrog
@@ -2381,7 +2433,6 @@ jobs:
               "Execution Verdict: $env:TESTGUIDE_VERDICT`n" +
               "Report ID: $env:TESTGUIDE_REPORT_ID`n" +
               "ATX Export Task ID: $env:ATX_EXPORT_TASK_ID`n`n" +
-              "Runner ZIP file: $env:ATX_FILE_PATH`n`n" +
               "JFrog ATX ZIP file:`n" +
               "$env:JFROG_FILE_URL`n`n" +
               "JFrog folder:`n" +
@@ -2433,7 +2484,7 @@ jobs:
           )
 
       # ============================================================
-      # 14. RETAIN ZIP AND DIAGNOSTICS IN GITHUB
+      # 14. RETAIN ZIP AND DIAGNOSTICS
       # ============================================================
 
       - name: Upload ATX ZIP and diagnostics to GitHub
