@@ -60,10 +60,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           function Clean-Value {
-              param(
-                  [AllowNull()]
-                  $Value
-              )
+              param($Value)
 
               if ($null -eq $Value) {
                   return ''
@@ -75,10 +72,7 @@ jobs:
           }
 
           function Clean-Path {
-              param(
-                  [AllowNull()]
-                  $Value
-              )
+              param($Value)
 
               if ($null -eq $Value) {
                   return ''
@@ -103,7 +97,7 @@ jobs:
               return $result
           }
 
-          function Export-GitHubEnvironmentValue {
+          function Set-WorkflowEnvironment {
               param(
                   [Parameter(Mandatory = $true)]
                   [string]$Name,
@@ -122,7 +116,7 @@ jobs:
           $jiraKey =
               Clean-Value $env:JIRA_KEY_RAW
 
-          $categoryInput =
+          $category =
               Clean-Value $env:CATEGORY_RAW
 
           $cwRelease =
@@ -138,10 +132,10 @@ jobs:
           $targetEcu =
               Clean-Value $env:TARGET_ECU_RAW
 
-          $flashArchive =
+          $flashArchiveLocation =
               Clean-Path $env:FLASH_ARCHIVE_RAW
 
-          $ralFile =
+          $ralFileLocation =
               Clean-Path $env:RAL_FILE_RAW
 
           $gitSubmodule =
@@ -154,7 +148,7 @@ jobs:
               throw 'jira_key is missing.'
           }
 
-          if (-not $categoryInput) {
+          if (-not $category) {
               throw 'category is missing.'
           }
 
@@ -173,7 +167,7 @@ jobs:
           if ($cwRelease -notmatch '^CW[0-9]{2}$') {
               throw (
                   "Invalid CW release [$cwRelease]. " +
-                  'Expected CW45 format.'
+                  'Expected a value such as CW45.'
               )
           }
 
@@ -186,43 +180,42 @@ jobs:
               throw "Unsupported Test Bench [$testBench]."
           }
 
-          switch ($categoryInput.ToLowerInvariant()) {
+          switch ($category.ToLowerInvariant()) {
               'network_test' {
-                  $categoryInput =
+                  $category =
                       'Network_Test'
               }
 
               'network_testing' {
-                  $categoryInput =
+                  $category =
                       'Network_Test'
               }
 
               'diagnostic_test' {
-                  $categoryInput =
+                  $category =
                       'Diagnostic_Test'
               }
 
               'diagnostic_testing' {
-                  $categoryInput =
+                  $category =
                       'Diagnostic_Test'
               }
 
               'bootloader_compliance_test' {
-                  $categoryInput =
+                  $category =
                       'Bootloader_Compliance_Test'
               }
 
               default {
                   throw (
-                      "Unsupported Jira category: " +
-                      "[$categoryInput]"
+                      "Unsupported Jira category [$category]."
                   )
               }
           }
 
           if (
-              $categoryInput -eq 'Diagnostic_Test' -and
-              -not $ralFile
+              $category -eq 'Diagnostic_Test' -and
+              -not $ralFileLocation
           ) {
               throw (
                   'Diagnostic_Test requires ' +
@@ -231,9 +224,9 @@ jobs:
           }
 
           if (
-              $categoryInput -eq
+              $category -eq
                   'Bootloader_Compliance_Test' -and
-              -not $flashArchive
+              -not $flashArchiveLocation
           ) {
               throw (
                   'Bootloader_Compliance_Test requires ' +
@@ -241,33 +234,62 @@ jobs:
               )
           }
 
-          Export-GitHubEnvironmentValue 'JIRA_KEY' $jiraKey
-          Export-GitHubEnvironmentValue 'CATEGORY_INPUT' $categoryInput
-          Export-GitHubEnvironmentValue 'CW_RELEASE' $cwRelease
-          Export-GitHubEnvironmentValue 'TEST_BENCH' $testBench
-          Export-GitHubEnvironmentValue 'TARGET_ECU' $targetEcu
-          Export-GitHubEnvironmentValue 'FLASH_ARCHIVE_LOCATION' $flashArchive
-          Export-GitHubEnvironmentValue 'RAL_FILE_LOCATION' $ralFile
-          Export-GitHubEnvironmentValue 'GIT_SUBMODULE' $gitSubmodule
-          Export-GitHubEnvironmentValue 'TEST_CASES' $testCases
+          Set-WorkflowEnvironment `
+              -Name 'JIRA_KEY' `
+              -Value $jiraKey
+
+          Set-WorkflowEnvironment `
+              -Name 'CATEGORY_INPUT' `
+              -Value $category
+
+          Set-WorkflowEnvironment `
+              -Name 'CW_RELEASE' `
+              -Value $cwRelease
+
+          Set-WorkflowEnvironment `
+              -Name 'TEST_BENCH' `
+              -Value $testBench
+
+          Set-WorkflowEnvironment `
+              -Name 'TARGET_ECU' `
+              -Value $targetEcu
+
+          Set-WorkflowEnvironment `
+              -Name 'FLASH_ARCHIVE_LOCATION' `
+              -Value $flashArchiveLocation
+
+          Set-WorkflowEnvironment `
+              -Name 'RAL_FILE_LOCATION' `
+              -Value $ralFileLocation
+
+          Set-WorkflowEnvironment `
+              -Name 'GIT_SUBMODULE' `
+              -Value $gitSubmodule
+
+          Set-WorkflowEnvironment `
+              -Name 'TEST_CASES' `
+              -Value $testCases
 
           Write-Host ''
           Write-Host '========================================'
           Write-Host 'PARSED JIRA INPUTS'
           Write-Host '========================================'
-          Write-Host "Jira Key      : [$jiraKey]"
-          Write-Host "Category      : [$categoryInput]"
-          Write-Host "CW Release    : [$cwRelease]"
-          Write-Host "Test Bench    : [$testBench]"
-          Write-Host "Target ECU    : [$targetEcu]"
-          Write-Host "Flash Archive : [$flashArchive]"
-          Write-Host "RAL File      : [$ralFile]"
-          Write-Host "Git Submodule : [$gitSubmodule]"
-          Write-Host "Test Cases    : [$testCases]"
+          Write-Host "Jira Key      : $jiraKey"
+          Write-Host "Category      : $category"
+          Write-Host "CW Release    : $cwRelease"
+          Write-Host "Test Bench    : $testBench"
+          Write-Host "Target ECU    : $targetEcu"
+          Write-Host "Flash Path    : $flashArchiveLocation"
+          Write-Host "RAL Path      : $ralFileLocation"
+          Write-Host "Git Submodule : $gitSubmodule"
+          Write-Host "Test Cases    : $testCases"
           Write-Host '========================================'
 
       # ============================================================
       # 2. SELECT EXISTING PLAYBOOK
+      #
+      # The input paths are not validated or transferred.
+      # They are passed as strings to TestGuide during execution.
       # ============================================================
 
       - name: Select existing TestGuide playbook
@@ -321,15 +343,15 @@ jobs:
 
               default {
                   throw (
-                      "Unsupported category: " +
-                      "[$env:CATEGORY_INPUT]"
+                      "Unsupported category " +
+                      "[$env:CATEGORY_INPUT]."
                   )
               }
           }
 
           if (-not $playbookId) {
               throw (
-                  'The selected playbook variable is empty for ' +
+                  'Playbook ID is empty for category ' +
                   "[$env:CATEGORY_INPUT]."
               )
           }
@@ -338,23 +360,17 @@ jobs:
               'syshil1' {
                   $resource =
                       'syshil1-labtest1'
-
-                  $configurationFolder =
-                      'SUBSYS1'
               }
 
               'syshil2' {
                   $resource =
                       'syshil2-labtest2'
-
-                  $configurationFolder =
-                      'SUBSYS1'
               }
 
               default {
                   throw (
-                      "Unsupported test bench: " +
-                      "[$env:TEST_BENCH]"
+                      "Unsupported test bench " +
+                      "[$env:TEST_BENCH]."
                   )
               }
           }
@@ -362,114 +378,42 @@ jobs:
           $workspace =
               $env:TESTGUIDE_WORKSPACE
 
-          $workspaceExists =
-              Test-Path `
-                  -LiteralPath $workspace `
-                  -PathType Container
-
-          if (-not $workspaceExists) {
+          if (
+              -not (
+                  Test-Path `
+                      -LiteralPath $workspace `
+                      -PathType Container
+              )
+          ) {
               throw (
-                  "Workspace does not exist: [$workspace]"
+                  "TestGuide workspace does not exist: " +
+                  "[$workspace]"
               )
           }
 
-          $fullProjectPath =
+          $projectPath =
               Join-Path `
                   -Path $workspace `
                   -ChildPath $projectRelativePath
 
-          $projectExists =
-              Test-Path `
-                  -LiteralPath $fullProjectPath `
-                  -PathType Leaf
-
-          if (-not $projectExists) {
+          if (
+              -not (
+                  Test-Path `
+                      -LiteralPath $projectPath `
+                      -PathType Leaf
+              )
+          ) {
               throw (
-                  "Project does not exist: [$fullProjectPath]"
+                  "Project does not exist: [$projectPath]"
               )
           }
 
-          $tbcRelativePath = (
-              "Configurations\" +
-              "$configurationFolder\" +
-              "${configurationFolder}_TestBenchConfig.tbc"
-          )
-
-          $tcfRelativePath = (
-              "Configurations\" +
-              "$configurationFolder\" +
-              "${configurationFolder}_TestConfig.tcf"
-          )
-
-          $fullTbcPath =
-              Join-Path `
-                  -Path $workspace `
-                  -ChildPath $tbcRelativePath
-
-          $fullTcfPath =
-              Join-Path `
-                  -Path $workspace `
-                  -ChildPath $tcfRelativePath
-
-          if (
-              -not (
-                  Test-Path `
-                      -LiteralPath $fullTbcPath `
-                      -PathType Leaf
-              )
-          ) {
-              throw "TBC does not exist: [$fullTbcPath]"
-          }
-
-          if (
-              -not (
-                  Test-Path `
-                      -LiteralPath $fullTcfPath `
-                      -PathType Leaf
-              )
-          ) {
-              throw "TCF does not exist: [$fullTcfPath]"
-          }
-
-          if (
-              $env:CATEGORY_INPUT -eq
-              'Diagnostic_Test'
-          ) {
-              $ralExists =
-                  Test-Path `
-                      -LiteralPath $env:RAL_FILE_LOCATION `
-                      -PathType Leaf
-
-              Write-Host "RAL Path   : [$env:RAL_FILE_LOCATION]"
-              Write-Host "RAL Exists : [$ralExists]"
-
-              if (-not $ralExists) {
-                  throw (
-                      "RAL file does not exist: " +
-                      "[$env:RAL_FILE_LOCATION]"
-                  )
-              }
-          }
-
-          if (
-              $env:CATEGORY_INPUT -eq
-              'Bootloader_Compliance_Test'
-          ) {
-              $flashExists =
-                  Test-Path `
-                      -LiteralPath $env:FLASH_ARCHIVE_LOCATION `
-                      -PathType Leaf
-
-              Write-Host "Flash Path   : [$env:FLASH_ARCHIVE_LOCATION]"
-              Write-Host "Flash Exists : [$flashExists]"
-
-              if (-not $flashExists) {
-                  throw (
-                      "Bootloader file does not exist: " +
-                      "[$env:FLASH_ARCHIVE_LOCATION]"
-                  )
-              }
-          }
+          # IMPORTANT:
+          # Do not use Test-Path, Get-Item, Get-Content, Copy-Item
+          # or upload operations on RAL_FILE_LOCATION or
+          # FLASH_ARCHIVE_LOCATION.
+          #
+          # Those values remain path strings only.
 
           $artifactRoot =
               Join-Path `
@@ -507,15 +451,6 @@ jobs:
               RESOURCE_NAME =
                   $resource
 
-              TBC_RELATIVE_PATH =
-                  $tbcRelativePath
-
-              TCF_RELATIVE_PATH =
-                  $tcfRelativePath
-
-              XIL_IDENTIFIER =
-                  "novi_hq/1stfloor/ee_lab_novi/$resource/ControlComputer"
-
               ARTIFACT_ROOT =
                   $artifactRoot
 
@@ -538,15 +473,38 @@ jobs:
           Write-Host '========================================'
           Write-Host 'SELECTED EXISTING PLAYBOOK'
           Write-Host '========================================'
-          Write-Host "Category    : [$category]"
-          Write-Host "Test Plan   : [$testPlanName]"
-          Write-Host "Playbook ID : [$playbookId]"
-          Write-Host "Project     : [$projectRelativePath]"
-          Write-Host "Resource    : [$resource]"
+          Write-Host "Category    : $category"
+          Write-Host "Test Plan   : $testPlanName"
+          Write-Host "Playbook ID : $playbookId"
+          Write-Host "Target ECU  : $env:TARGET_ECU"
+
+          if (
+              $env:CATEGORY_INPUT -eq
+              'Diagnostic_Test'
+          ) {
+              Write-Host (
+                  'RAL path will be passed as a constant: ' +
+                  "$env:RAL_FILE_LOCATION"
+              )
+          }
+
+          if (
+              $env:CATEGORY_INPUT -eq
+              'Bootloader_Compliance_Test'
+          ) {
+              Write-Host (
+                  'Flash path will be passed as a constant: ' +
+                  "$env:FLASH_ARCHIVE_LOCATION"
+              )
+          }
+
           Write-Host '========================================'
 
       # ============================================================
       # 3. EXECUTE EXISTING PLAYBOOK
+      #
+      # Only string constants are passed.
+      # No RAL/HEX files are sent from the runner.
       # ============================================================
 
       - name: Execute selected TestGuide playbook
@@ -566,15 +524,25 @@ jobs:
               $cleanPath =
                   $Path.Trim().Trim('"')
 
+              $escapedPath =
+                  $cleanPath.Replace(
+                      '\',
+                      '\\'
+                  )
+
               return (
                   '"' +
-                  $cleanPath.Replace('\', '\\') +
+                  $escapedPath +
                   '"'
               )
           }
 
           if (-not $env:ONECX_AUTH_KEY) {
               throw 'ONECX_AUTH_KEY is missing.'
+          }
+
+          if (-not $env:ONECX_PROJECT_ID) {
+              throw 'ONECX_PROJECT_ID is missing.'
           }
 
           if (-not $env:TESTGUIDE_PLAYBOOK_ID) {
@@ -615,8 +583,6 @@ jobs:
                       value =
                           $ralExpression
                   }
-
-              Write-Host "RAL expression: [$ralExpression]"
           }
 
           if (
@@ -635,8 +601,6 @@ jobs:
                       value =
                           $flashExpression
                   }
-
-              Write-Host "Flash expression: [$flashExpression]"
           }
 
           $headers = @{
@@ -654,7 +618,7 @@ jobs:
               "&checkLastExecution=true"
           )
 
-          $requestBody = @{
+          $body = @{
               parameters =
                   $executionParameters
           } |
@@ -662,12 +626,12 @@ jobs:
 
           Write-Host ''
           Write-Host '========================================'
-          Write-Host 'EXECUTING EXISTING PLAYBOOK'
+          Write-Host 'TESTGUIDE EXECUTION INPUT'
           Write-Host '========================================'
-          Write-Host "Category    : [$env:CATEGORY_INPUT]"
-          Write-Host "Playbook ID : [$env:TESTGUIDE_PLAYBOOK_ID]"
-          Write-Host "Target ECU  : [$env:TARGET_ECU]"
-          Write-Host 'Parameters:'
+          Write-Host "Playbook ID : $env:TESTGUIDE_PLAYBOOK_ID"
+          Write-Host "Category    : $env:CATEGORY_INPUT"
+          Write-Host "Target ECU  : $env:TARGET_ECU"
+          Write-Host 'Constants:'
 
           Write-Host (
               $executionParameters |
@@ -682,7 +646,7 @@ jobs:
                   -Uri $executeUrl `
                   -Headers $headers `
                   -ContentType 'application/json' `
-                  -Body $requestBody `
+                  -Body $body `
                   -ErrorAction Stop
 
           $response |
@@ -737,7 +701,7 @@ jobs:
                   -Append `
                   -Encoding utf8
 
-          Write-Host "Execution Task ID: [$taskId]"
+          Write-Host "Execution task ID: $taskId"
 
       # ============================================================
       # 4. POLL EXECUTION TASK
@@ -765,7 +729,7 @@ jobs:
               "?projectId=$env:ONECX_PROJECT_ID"
           )
 
-          $finishedStates = @(
+          $completeStates = @(
               'FINISHED',
               'COMPLETED',
               'COMPLETE',
@@ -775,7 +739,7 @@ jobs:
               'ENDED'
           )
 
-          $failedStates = @(
+          $failureStates = @(
               'ABORTED',
               'ABORT',
               'ERROR',
@@ -785,11 +749,11 @@ jobs:
               'CANCELED'
           )
 
-          $attempt =
-              0
-
           $deadline =
               (Get-Date).AddMinutes(180)
+
+          $attempt =
+              0
 
           while ((Get-Date) -lt $deadline) {
               $attempt++
@@ -826,10 +790,6 @@ jobs:
                   "Verdict=$verdict"
               )
 
-              if ($stateInfo) {
-                  Write-Host "StateInfo=$stateInfo"
-              }
-
               $task |
                   ConvertTo-Json -Depth 30 |
                   Set-Content `
@@ -848,22 +808,17 @@ jobs:
 
                   throw (
                       'Execution-task API returned no state. ' +
-                      "Task=[$env:TESTGUIDE_TASK_ID]"
+                      "Task=$env:TESTGUIDE_TASK_ID"
                   )
               }
 
-              if ($state -in $failedStates) {
+              if ($state -in $failureStates) {
                   $safeStateInfo =
                       (
                           $stateInfo -replace
                           '[\r\n]+',
                           ' '
                       ).Trim()
-
-                  if (-not $safeStateInfo) {
-                      $safeStateInfo =
-                          "Execution ended with state $state."
-                  }
 
                   "TESTGUIDE_STATE=$state" |
                       Out-File `
@@ -884,14 +839,13 @@ jobs:
                           -Encoding utf8
 
                   throw (
-                      "Execution ended. " +
-                      "State=$state; " +
+                      "Execution ended. State=$state; " +
                       "Message=$safeStateInfo"
                   )
               }
 
               if (
-                  ($state -in $finishedStates) -or
+                  ($state -in $completeStates) -or
                   $endDate
               ) {
                   if (-not $startDate) {
@@ -937,12 +891,10 @@ jobs:
                   Write-Host '========================================'
                   Write-Host 'EXECUTION COMPLETE'
                   Write-Host '========================================'
-                  Write-Host "Playbook ID : [$env:TESTGUIDE_PLAYBOOK_ID]"
-                  Write-Host "Task ID     : [$env:TESTGUIDE_TASK_ID]"
-                  Write-Host "State       : [$state]"
-                  Write-Host "Verdict     : [$verdict]"
-                  Write-Host "Start       : [$startDate]"
-                  Write-Host "End         : [$endDate]"
+                  Write-Host "State   : $state"
+                  Write-Host "Verdict : $verdict"
+                  Write-Host "Start   : $startDate"
+                  Write-Host "End     : $endDate"
                   Write-Host '========================================'
 
                   exit 0
@@ -952,15 +904,14 @@ jobs:
           }
 
           throw (
-              'Execution polling exceeded 180 minutes. ' +
-              "Task=[$env:TESTGUIDE_TASK_ID]"
+              'Execution polling exceeded 180 minutes.'
           )
 
       # ============================================================
-      # 5. FIND GENERATED REPORT FOR FULL UTC DAY
+      # 5. FIND REPORT FOR THE FULL UTC DAY
       #
-      # Correct endpoint:
-      # GET /api/report/reports/history
+      # Confirmed endpoint:
+      # /api/report/reports/history
       # ============================================================
 
       - name: Find TestGuide report
@@ -991,8 +942,8 @@ jobs:
           Write-Host '========================================'
           Write-Host 'PARSING EXECUTION DATES'
           Write-Host '========================================'
-          Write-Host "Raw Start : [$env:TASK_START_DATE]"
-          Write-Host "Raw End   : [$env:TASK_END_DATE]"
+          Write-Host "Raw Start : $env:TASK_START_DATE"
+          Write-Host "Raw End   : $env:TASK_END_DATE"
           Write-Host '========================================'
 
           try {
@@ -1002,25 +953,15 @@ jobs:
                       [System.Globalization.CultureInfo]::InvariantCulture,
                       [System.Globalization.DateTimeStyles]::AssumeUniversal
                   )
-
-              $executionEnd =
-                  [System.DateTimeOffset]::Parse(
-                      $env:TASK_END_DATE,
-                      [System.Globalization.CultureInfo]::InvariantCulture,
-                      [System.Globalization.DateTimeStyles]::AssumeUniversal
-                  )
           }
           catch {
               throw (
-                  'Unable to parse execution dates. ' +
-                  "Start=[$env:TASK_START_DATE]; " +
-                  "End=[$env:TASK_END_DATE]; " +
+                  'Unable to parse execution start date. ' +
+                  "Value=[$env:TASK_START_DATE]; " +
                   "Error=$($_.Exception.Message)"
               )
           }
 
-          # Search the complete UTC day containing the execution.
-          # The end is exclusive: next day at 00:00:00Z.
           $executionUtc =
               $executionStart.ToUniversalTime()
 
@@ -1060,7 +1001,6 @@ jobs:
                   $historyEnd
               )
 
-          # Correct API route confirmed from Swagger.
           $historyUrl = (
               "$env:ONECX_URL/api/report/reports/history" +
               "?projectId=$env:ONECX_PROJECT_ID" +
@@ -1074,10 +1014,10 @@ jobs:
           Write-Host '========================================'
           Write-Host 'FULL-DAY REPORT HISTORY LOOKUP'
           Write-Host '========================================'
-          Write-Host "Test Plan : [$env:TEST_PLAN_NAME]"
-          Write-Host "Start     : [$historyStart]"
-          Write-Host "End       : [$historyEnd]"
-          Write-Host "URL       : [$historyUrl]"
+          Write-Host "Test Plan : $env:TEST_PLAN_NAME"
+          Write-Host "Start     : $historyStart"
+          Write-Host "End       : $historyEnd"
+          Write-Host "URL       : $historyUrl"
           Write-Host '========================================'
 
           $selectedReport =
@@ -1095,12 +1035,9 @@ jobs:
                       -Headers $headers `
                       -ErrorAction Stop
 
-              $reportArray =
-                  @($reports)
-
               $matchingReports =
                   @(
-                      $reportArray |
+                      @($reports) |
                           Where-Object {
                               "$($_.status)".
                                   Trim().
@@ -1115,73 +1052,69 @@ jobs:
 
               Write-Host (
                   "Report lookup attempt=$attempt " +
-                  "Returned=$($reportArray.Count) " +
                   "Matching=$($matchingReports.Count)"
               )
 
-              $sortableReports =
-                  @()
-
-              foreach ($report in $matchingReports) {
-                  $parsedExecutionDate =
-                      [System.DateTimeOffset]::MinValue
-
-                  $parsedUploadDate =
-                      [System.DateTimeOffset]::MinValue
-
-                  if ($report.executionDate) {
-                      $temporaryExecutionDate =
+              $rankedReports =
+                  foreach ($report in $matchingReports) {
+                      $reportExecutionDate =
                           [System.DateTimeOffset]::MinValue
 
-                      $executionParsed =
-                          [System.DateTimeOffset]::TryParse(
-                              "$($report.executionDate)",
-                              [System.Globalization.CultureInfo]::InvariantCulture,
-                              [System.Globalization.DateTimeStyles]::AssumeUniversal,
-                              [ref]$temporaryExecutionDate
-                          )
-
-                      if ($executionParsed) {
-                          $parsedExecutionDate =
-                              $temporaryExecutionDate
-                  }
-                  }
-
-                  if ($report.uploadDate) {
-                      $temporaryUploadDate =
+                      $reportUploadDate =
                           [System.DateTimeOffset]::MinValue
 
-                      $uploadParsed =
-                          [System.DateTimeOffset]::TryParse(
-                              "$($report.uploadDate)",
-                              [System.Globalization.CultureInfo]::InvariantCulture,
-                              [System.Globalization.DateTimeStyles]::AssumeUniversal,
-                              [ref]$temporaryUploadDate
-                          )
+                      if ($report.executionDate) {
+                          $temporaryExecutionDate =
+                              [System.DateTimeOffset]::MinValue
 
-                      if ($uploadParsed) {
-                          $parsedUploadDate =
-                              $temporaryUploadDate
-                  }
-                  }
+                          $executionParsed =
+                              [System.DateTimeOffset]::TryParse(
+                                  "$($report.executionDate)",
+                                  [System.Globalization.CultureInfo]::InvariantCulture,
+                                  [System.Globalization.DateTimeStyles]::AssumeUniversal,
+                                  [ref]$temporaryExecutionDate
+                              )
 
-                  $differenceSeconds =
-                      :MaxValue
+                          if ($executionParsed) {
+                              $reportExecutionDate =
+                                  $temporaryExecutionDate
+                          }
+                      }
 
-                  if (
-                      $parsedExecutionDate -ne
-                      [System.DateTimeOffset]::MinValue
-                  ) {
+                      if ($report.uploadDate) {
+                          $temporaryUploadDate =
+                              [System.DateTimeOffset]::MinValue
+
+                          $uploadParsed =
+                              [System.DateTimeOffset]::TryParse(
+                                  "$($report.uploadDate)",
+                                  [System.Globalization.CultureInfo]::InvariantCulture,
+                                  [System.Globalization.DateTimeStyles]::AssumeUniversal,
+                                  [ref]$temporaryUploadDate
+                              )
+
+                          if ($uploadParsed) {
+                              $reportUploadDate =
+                                  $temporaryUploadDate
+                          }
+                      }
+
                       $differenceSeconds =
-                          [System.Math]::Abs(
-                              (
-                                  $parsedExecutionDate -
-                                  $executionStart
-                              ).TotalSeconds
-                          )
-                  }
+                          :MaxValue
 
-                  $sortableReports +=
+                      if (
+                          $reportExecutionDate -ne
+                          [System.DateTimeOffset]::MinValue
+                      ) {
+                          $differenceSeconds =
+                              [System.Math]::Abs(
+                                  (
+                                      $reportExecutionDate -
+                                      $executionStart
+                                  ).TotalSeconds
+                              )
+                      }
+
                       [PSCustomObject]@{
                           Report =
                               $report
@@ -1189,16 +1122,13 @@ jobs:
                           DifferenceSeconds =
                               $differenceSeconds
 
-                          ParsedUploadDate =
-                              $parsedUploadDate
+                          UploadDate =
+                              $reportUploadDate
                       }
-              }
+                  }
 
-              # Prefer the matching report whose executionDate is
-              # closest to this execution's start time. Upload date
-              # is used as a tiebreaker.
               $selectedWrapper =
-                  $sortableReports |
+                  $rankedReports |
                       Sort-Object `
                           -Property @(
                               @{
@@ -1210,7 +1140,7 @@ jobs:
                               },
                               @{
                                   Expression =
-                                      'ParsedUploadDate'
+                                      'UploadDate'
 
                                   Descending =
                                       $true
@@ -1223,27 +1153,20 @@ jobs:
                       $selectedWrapper.Report
 
                   Write-Host (
-                      'Selected report difference from ' +
-                      'execution start: ' +
-                      "[$($selectedWrapper.DifferenceSeconds)] seconds"
+                      'Selected report difference: ' +
+                      "$($selectedWrapper.DifferenceSeconds) seconds"
                   )
 
                   break
               }
-
-              Write-Host (
-                  'No matching COMPLETE report yet. ' +
-                  'Checking again in 15 seconds.'
-              )
 
               Start-Sleep -Seconds 15
           }
 
           if ($null -eq $selectedReport) {
               throw (
-                  'No COMPLETE TestGuide report was found for ' +
-                  "[$env:TEST_PLAN_NAME] during " +
-                  "[$historyStart] through [$historyEnd]."
+                  'No COMPLETE report found for ' +
+                  "[$env:TEST_PLAN_NAME] on the execution day."
               )
           }
 
@@ -1251,7 +1174,7 @@ jobs:
               "$($selectedReport.reportId)".Trim()
 
           if (-not $reportId) {
-              throw 'The selected report has no reportId.'
+              throw 'Selected report contains no reportId.'
           }
 
           "TESTGUIDE_REPORT_ID=$reportId" |
@@ -1264,18 +1187,16 @@ jobs:
           Write-Host '========================================'
           Write-Host 'REPORT FOUND'
           Write-Host '========================================'
-          Write-Host "Report ID      : [$reportId]"
-          Write-Host "Test Plan      : [$($selectedReport.testPlanName)]"
-          Write-Host "Status         : [$($selectedReport.status)]"
-          Write-Host "Execution Date : [$($selectedReport.executionDate)]"
-          Write-Host "Upload Date    : [$($selectedReport.uploadDate)]"
-          Write-Host "File Size      : [$($selectedReport.fileSize)]"
+          Write-Host "Report ID      : $reportId"
+          Write-Host "Test Plan      : $($selectedReport.testPlanName)"
+          Write-Host "Status         : $($selectedReport.status)"
+          Write-Host "Execution Date : $($selectedReport.executionDate)"
+          Write-Host "Upload Date    : $($selectedReport.uploadDate)"
+          Write-Host "File Size      : $($selectedReport.fileSize)"
           Write-Host '========================================'
 
       # ============================================================
       # 6. START ATX EXPORT
-      #
-      # Report API uses /api/report, not /api/v2/report.
       # ============================================================
 
       - name: Start ATX export
@@ -1298,18 +1219,16 @@ jobs:
                   'application/json'
           }
 
-          $url = (
+          $exportUrl = (
               "$env:ONECX_URL/api/report/export/atx/" +
               "$env:TESTGUIDE_REPORT_ID" +
               "?projectId=$env:ONECX_PROJECT_ID"
           )
 
-          Write-Host "ATX export URL: [$url]"
-
           $response =
               Invoke-RestMethod `
                   -Method Post `
-                  -Uri $url `
+                  -Uri $exportUrl `
                   -Headers $headers `
                   -ContentType 'application/json' `
                   -ErrorAction Stop
@@ -1355,8 +1274,7 @@ jobs:
 
           if (-not $exportTaskId) {
               throw (
-                  'ATX export response did not contain ' +
-                  'a recognizable task ID.'
+                  'ATX export response contains no task ID.'
               )
           }
 
@@ -1366,9 +1284,7 @@ jobs:
                   -Append `
                   -Encoding utf8
 
-          Write-Host (
-              "ATX Export Task ID: [$exportTaskId]"
-          )
+          Write-Host "ATX export task ID: $exportTaskId"
 
       # ============================================================
       # 7. POLL ATX EXPORT
@@ -1390,13 +1306,11 @@ jobs:
                   'application/json'
           }
 
-          $url = (
+          $statusUrl = (
               "$env:ONECX_URL/api/report/export/atx/" +
               "$env:ATX_EXPORT_TASK_ID/status" +
               "?projectId=$env:ONECX_PROJECT_ID"
           )
-
-          Write-Host "ATX status URL: [$url]"
 
           $deadline =
               (Get-Date).AddMinutes(30)
@@ -1410,7 +1324,7 @@ jobs:
               $response =
                   Invoke-RestMethod `
                       -Method Get `
-                      -Uri $url `
+                      -Uri $statusUrl `
                       -Headers $headers `
                       -ErrorAction Stop
 
@@ -1464,30 +1378,25 @@ jobs:
                       'CANCELED'
                   )
               ) {
-                  throw (
-                      "ATX export failed. State=$state"
-                  )
+                  throw "ATX export failed. State=$state"
               }
 
               if (-not $state) {
-                  $responseJson =
-                      $response |
-                          ConvertTo-Json `
-                              -Compress `
-                              -Depth 20
-
                   throw (
                       'Unable to determine ATX export state. ' +
-                      "Response=$responseJson"
+                      (
+                          $response |
+                              ConvertTo-Json `
+                                  -Compress `
+                                  -Depth 20
+                      )
                   )
               }
 
               Start-Sleep -Seconds 5
           }
 
-          throw (
-              'ATX export polling exceeded 30 minutes.'
-          )
+          throw 'ATX export polling exceeded 30 minutes.'
 
       # ============================================================
       # 8. DOWNLOAD GENERATED ATX
@@ -1509,13 +1418,11 @@ jobs:
                   'application/octet-stream'
           }
 
-          $url = (
+          $downloadUrl = (
               "$env:ONECX_URL/api/report/export/atx/" +
               "$env:ATX_EXPORT_TASK_ID/download" +
               "?projectId=$env:ONECX_PROJECT_ID"
           )
-
-          Write-Host "ATX download URL: [$url]"
 
           $fileName = (
               "$env:TEST_PLAN_NAME" +
@@ -1533,7 +1440,7 @@ jobs:
 
           Invoke-WebRequest `
               -Method Get `
-              -Uri $url `
+              -Uri $downloadUrl `
               -Headers $headers `
               -OutFile $destination `
               -ErrorAction Stop
@@ -1558,13 +1465,7 @@ jobs:
                   -Append `
                   -Encoding utf8
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'ATX DOWNLOAD COMPLETE'
-          Write-Host '========================================'
-          Write-Host "File : [$destination]"
-          Write-Host "Size : [$($file.Length)] bytes"
-          Write-Host '========================================'
+          Write-Host "Downloaded ATX: $destination"
 
       # ============================================================
       # 9. BUILD JFROG DESTINATION
@@ -1601,33 +1502,33 @@ jobs:
               return $safe
           }
 
-          $release =
-              Convert-ToSafeSegment `
-                  -Value $env:CW_RELEASE
-
-          $ecu =
-              Convert-ToSafeSegment `
-                  -Value $env:TARGET_ECU
-
-          $category =
-              Convert-ToSafeSegment `
-                  -Value $env:CATEGORY
-
-          $testPlan =
-              Convert-ToSafeSegment `
-                  -Value $env:TEST_PLAN_NAME
-
-          $timestamp =
-              Convert-ToSafeSegment `
-                  -Value $env:RUN_TIMESTAMP
-
           $targetPath = (
               'L2_Quality_Gate/' +
-              "$release/" +
-              "$ecu/" +
-              "$category/" +
-              "$testPlan/" +
-              "$timestamp/"
+              (
+                  Convert-ToSafeSegment `
+                      -Value $env:CW_RELEASE
+              ) +
+              '/' +
+              (
+                  Convert-ToSafeSegment `
+                      -Value $env:TARGET_ECU
+              ) +
+              '/' +
+              (
+                  Convert-ToSafeSegment `
+                      -Value $env:CATEGORY
+              ) +
+              '/' +
+              (
+                  Convert-ToSafeSegment `
+                      -Value $env:TEST_PLAN_NAME
+              ) +
+              '/' +
+              (
+                  Convert-ToSafeSegment `
+                      -Value $env:RUN_TIMESTAMP
+              ) +
+              '/'
           )
 
           "JFROG_TARGET_PATH=$targetPath" |
@@ -1636,12 +1537,10 @@ jobs:
                   -Append `
                   -Encoding utf8
 
-          Write-Host (
-              "JFrog target: [$targetPath]"
-          )
+          Write-Host "JFrog target: $targetPath"
 
       # ============================================================
-      # 10. UPLOAD ATX TO JFROG
+      # 10. UPLOAD ONLY THE GENERATED ATX TO JFROG
       # ============================================================
 
       - name: Upload generated ATX to JFrog
@@ -1735,16 +1634,10 @@ jobs:
                   -Append `
                   -Encoding utf8
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'JFROG UPLOAD COMPLETE'
-          Write-Host '========================================'
-          Write-Host "File URL   : [$uploadUrl]"
-          Write-Host "Folder URL : [$folderUrl]"
-          Write-Host '========================================'
+          Write-Host "JFrog ATX URL: $uploadUrl"
 
       # ============================================================
-      # 11. ADD ATX LOCATION TO JIRA
+      # 11. ADD JFROG ATX LOCATION TO JIRA
       # ============================================================
 
       - name: Add ATX location to Jira
@@ -1772,7 +1665,7 @@ jobs:
               throw 'JFROG_FILE_URL is missing.'
           }
 
-          $githubRunUrl =
+          $runUrl =
               'https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'
 
           $commentText = (
@@ -1781,28 +1674,19 @@ jobs:
               "Test Plan: $env:TEST_PLAN_NAME`n" +
               "CW Release: $env:CW_RELEASE`n" +
               "Target ECU: $env:TARGET_ECU`n" +
-              "Test Bench: $env:TEST_BENCH`n" +
-              "Project: $env:PROJECT_RELATIVE_PATH`n`n" +
-              "Existing Playbook ID: " +
-              "$env:TESTGUIDE_PLAYBOOK_ID`n" +
-              "Execution Task ID: " +
-              "$env:TESTGUIDE_TASK_ID`n" +
-              "Execution State: " +
-              "$env:TESTGUIDE_STATE`n" +
-              "Execution Verdict: " +
-              "$env:TESTGUIDE_VERDICT`n" +
-              "Report ID: " +
-              "$env:TESTGUIDE_REPORT_ID`n" +
-              "ATX Export Task ID: " +
-              "$env:ATX_EXPORT_TASK_ID`n`n" +
-              "ATX file on runner:`n" +
-              "$env:ATX_FILE_PATH`n`n" +
+              "Test Bench: $env:TEST_BENCH`n`n" +
+              "Playbook ID: $env:TESTGUIDE_PLAYBOOK_ID`n" +
+              "Execution Task ID: $env:TESTGUIDE_TASK_ID`n" +
+              "Execution State: $env:TESTGUIDE_STATE`n" +
+              "Execution Verdict: $env:TESTGUIDE_VERDICT`n" +
+              "Report ID: $env:TESTGUIDE_REPORT_ID`n" +
+              "ATX Export Task ID: $env:ATX_EXPORT_TASK_ID`n`n" +
               "JFrog ATX file:`n" +
               "$env:JFROG_FILE_URL`n`n" +
               "JFrog folder:`n" +
               "$env:JFROG_FOLDER_URL`n`n" +
               "GitHub run:`n" +
-              "$githubRunUrl"
+              "$runUrl"
           )
 
           $commentFile =
@@ -1843,12 +1727,10 @@ jobs:
               )
           }
 
-          Write-Host (
-              "Jira comment added to [$env:JIRA_KEY]."
-          )
+          Write-Host "Jira comment added to $env:JIRA_KEY."
 
       # ============================================================
-      # 12. RETAIN ATX AND LOGS
+      # 12. RETAIN GENERATED ATX AND API RESPONSES
       # ============================================================
 
       - name: Upload ATX and diagnostics to GitHub
