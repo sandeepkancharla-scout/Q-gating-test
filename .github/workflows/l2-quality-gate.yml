@@ -353,7 +353,7 @@ jobs:
                       'syshil1-labtest1'
 
                   $configurationFolder =
-                      'SYSHIL2'
+                      'SUBSYS2'
               }
 
               'syshil2' {
@@ -361,7 +361,7 @@ jobs:
                       'syshil2-labtest2'
 
                   $configurationFolder =
-                      'SYSHIL2'
+                      'SUBSYS2'
               }
               'info1' {
                   $resource =
