@@ -1975,7 +1975,7 @@ jobs:
                   $env:ONECX_AUTH_KEY
 
               Accept =
-                  'application/octet-stream'
+                  'application/zip'
           }
 
           $downloadUrl = (
