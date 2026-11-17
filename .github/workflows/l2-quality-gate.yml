@@ -11,11 +11,6 @@ permissions:
 env:
   ONECX_URL: https://testguide-ssp.onecx.vwgroup.com
   ONECX_PROJECT_ID: ${{ vars.ONECX_PROJECT_ID }}
-
-  NETWORK_PLAYBOOK_ID: ${{ vars.NETWORK_PLAYBOOK_ID }}
-  DIAGNOSTIC_PLAYBOOK_ID: ${{ vars.DIAGNOSTIC_PLAYBOOK_ID }}
-  BOOTLOADER_PLAYBOOK_ID: ${{ vars.BOOTLOADER_PLAYBOOK_ID }}
-
   TESTGUIDE_WORKSPACE: C:\HIL\Testing\eeint-Test-Automation
 
   JFROG_URL: https://artifactory.sctmtrs.xyz/artifactory
@@ -116,7 +111,7 @@ jobs:
           $jiraKey =
               Clean-Value $env:JIRA_KEY_RAW
 
-          $category =
+          $categoryInput =
               Clean-Value $env:CATEGORY_RAW
 
           $cwRelease =
@@ -148,7 +143,7 @@ jobs:
               throw 'jira_key is missing.'
           }
 
-          if (-not $category) {
+          if (-not $categoryInput) {
               throw 'category is missing.'
           }
 
@@ -167,7 +162,7 @@ jobs:
           if ($cwRelease -notmatch '^CW[0-9]{2}$') {
               throw (
                   "Invalid CW release [$cwRelease]. " +
-                  'Expected a value such as CW45.'
+                  'Expected CW45 format.'
               )
           }
 
@@ -177,44 +172,45 @@ jobs:
                   'syshil2'
               )
           ) {
-              throw "Unsupported Test Bench [$testBench]."
+              throw "Unsupported test bench [$testBench]."
           }
 
-          switch ($category.ToLowerInvariant()) {
+          switch ($categoryInput.ToLowerInvariant()) {
               'network_test' {
-                  $category =
+                  $categoryInput =
                       'Network_Test'
               }
 
               'network_testing' {
-                  $category =
+                  $categoryInput =
                       'Network_Test'
               }
 
               'diagnostic_test' {
-                  $category =
+                  $categoryInput =
                       'Diagnostic_Test'
               }
 
               'diagnostic_testing' {
-                  $category =
+                  $categoryInput =
                       'Diagnostic_Test'
               }
 
               'bootloader_compliance_test' {
-                  $category =
+                  $categoryInput =
                       'Bootloader_Compliance_Test'
               }
 
               default {
                   throw (
-                      "Unsupported Jira category [$category]."
+                      "Unsupported Jira category " +
+                      "[$categoryInput]."
                   )
               }
           }
 
           if (
-              $category -eq 'Diagnostic_Test' -and
+              $categoryInput -eq 'Diagnostic_Test' -and
               -not $ralFileLocation
           ) {
               throw (
@@ -224,7 +220,7 @@ jobs:
           }
 
           if (
-              $category -eq
+              $categoryInput -eq
                   'Bootloader_Compliance_Test' -and
               -not $flashArchiveLocation
           ) {
@@ -240,7 +236,7 @@ jobs:
 
           Set-WorkflowEnvironment `
               -Name 'CATEGORY_INPUT' `
-              -Value $category
+              -Value $categoryInput
 
           Set-WorkflowEnvironment `
               -Name 'CW_RELEASE' `
@@ -275,7 +271,7 @@ jobs:
           Write-Host 'PARSED JIRA INPUTS'
           Write-Host '========================================'
           Write-Host "Jira Key      : $jiraKey"
-          Write-Host "Category      : $category"
+          Write-Host "Category      : $categoryInput"
           Write-Host "CW Release    : $cwRelease"
           Write-Host "Test Bench    : $testBench"
           Write-Host "Target ECU    : $targetEcu"
@@ -286,13 +282,14 @@ jobs:
           Write-Host '========================================'
 
       # ============================================================
-      # 2. SELECT EXISTING PLAYBOOK
+      # 2. ROUTE CATEGORY AND PREPARE NEW PLAYBOOK
       #
-      # The input paths are not validated or transferred.
-      # They are passed as strings to TestGuide during execution.
+      # No GitHub checkout.
+      # No RAL or HEX file validation.
+      # RAL and HEX values remain strings only.
       # ============================================================
 
-      - name: Select existing TestGuide playbook
+      - name: Route category and prepare playbook
         shell: pwsh
 
         run: |
@@ -306,8 +303,8 @@ jobs:
                   $testPlanName =
                       'NetworkTest'
 
-                  $playbookId =
-                      $env:NETWORK_PLAYBOOK_ID
+                  $playbookBaseName =
+                      'L2-network-testing'
 
                   $projectRelativePath =
                       'Packages\L2-Quality-Gate\ProjectGenerator\Network-Test\NetworkTest.prj'
@@ -320,8 +317,8 @@ jobs:
                   $testPlanName =
                       'DiagnosticTest'
 
-                  $playbookId =
-                      $env:DIAGNOSTIC_PLAYBOOK_ID
+                  $playbookBaseName =
+                      'L2-Diagnostic-testing'
 
                   $projectRelativePath =
                       'Packages\L2-Quality-Gate\ProjectGenerator\Diagnostic-Test\DiagnosticTest.prj'
@@ -334,8 +331,8 @@ jobs:
                   $testPlanName =
                       'BootloaderComplianceTest'
 
-                  $playbookId =
-                      $env:BOOTLOADER_PLAYBOOK_ID
+                  $playbookBaseName =
+                      'L2-Bootloader-testing'
 
                   $projectRelativePath =
                       'Packages\L2-Quality-Gate\ProjectGenerator\Bootloader-Compliance-Test\BootloaderComplianceTest.prj'
@@ -349,22 +346,21 @@ jobs:
               }
           }
 
-          if (-not $playbookId) {
-              throw (
-                  'Playbook ID is empty for category ' +
-                  "[$env:CATEGORY_INPUT]."
-              )
-          }
-
           switch ($env:TEST_BENCH) {
               'syshil1' {
                   $resource =
                       'syshil1-labtest1'
+
+                  $configurationFolder =
+                      'SUBSYS1'
               }
 
               'syshil2' {
                   $resource =
                       'syshil2-labtest2'
+
+                  $configurationFolder =
+                      'SUBSYS1'
               }
 
               default {
@@ -391,7 +387,10 @@ jobs:
               )
           }
 
-          $projectPath =
+          # Validate only workflow/project configuration files.
+          # Do not validate Jira RAL or HEX input paths.
+
+          $fullProjectPath =
               Join-Path `
                   -Path $workspace `
                   -ChildPath $projectRelativePath
@@ -399,21 +398,57 @@ jobs:
           if (
               -not (
                   Test-Path `
-                      -LiteralPath $projectPath `
+                      -LiteralPath $fullProjectPath `
                       -PathType Leaf
               )
           ) {
               throw (
-                  "Project does not exist: [$projectPath]"
+                  "Project does not exist: " +
+                  "[$fullProjectPath]"
               )
           }
 
-          # IMPORTANT:
-          # Do not use Test-Path, Get-Item, Get-Content, Copy-Item
-          # or upload operations on RAL_FILE_LOCATION or
-          # FLASH_ARCHIVE_LOCATION.
-          #
-          # Those values remain path strings only.
+          $tbcRelativePath = (
+              "Configurations\" +
+              "$configurationFolder\" +
+              "${configurationFolder}_TestBenchConfig.tbc"
+          )
+
+          $tcfRelativePath = (
+              "Configurations\" +
+              "$configurationFolder\" +
+              "${configurationFolder}_TestConfig.tcf"
+          )
+
+          $fullTbcPath =
+              Join-Path `
+                  -Path $workspace `
+                  -ChildPath $tbcRelativePath
+
+          $fullTcfPath =
+              Join-Path `
+                  -Path $workspace `
+                  -ChildPath $tcfRelativePath
+
+          if (
+              -not (
+                  Test-Path `
+                      -LiteralPath $fullTbcPath `
+                      -PathType Leaf
+              )
+          ) {
+              throw "TBC does not exist: [$fullTbcPath]"
+          }
+
+          if (
+              -not (
+                  Test-Path `
+                      -LiteralPath $fullTcfPath `
+                      -PathType Leaf
+              )
+          ) {
+              throw "TCF does not exist: [$fullTcfPath]"
+          }
 
           $artifactRoot =
               Join-Path `
@@ -435,6 +470,12 @@ jobs:
               Get-Date `
                   -Format 'yyyy-MM-dd_HHmmss'
 
+          $playbookName = (
+              "$playbookBaseName-" +
+              "$env:JIRA_KEY-" +
+              "$runTimestamp"
+          )
+
           $values = [ordered]@{
               CATEGORY =
                   $category
@@ -442,14 +483,26 @@ jobs:
               TEST_PLAN_NAME =
                   $testPlanName
 
-              TESTGUIDE_PLAYBOOK_ID =
-                  "$playbookId"
+              PLAYBOOK_BASE_NAME =
+                  $playbookBaseName
+
+              PLAYBOOK_NAME =
+                  $playbookName
 
               PROJECT_RELATIVE_PATH =
                   $projectRelativePath
 
               RESOURCE_NAME =
                   $resource
+
+              TBC_RELATIVE_PATH =
+                  $tbcRelativePath
+
+              TCF_RELATIVE_PATH =
+                  $tcfRelativePath
+
+              XIL_IDENTIFIER =
+                  "novi_hq/1stfloor/ee_lab_novi/$resource/ControlComputer"
 
               ARTIFACT_ROOT =
                   $artifactRoot
@@ -471,19 +524,21 @@ jobs:
 
           Write-Host ''
           Write-Host '========================================'
-          Write-Host 'SELECTED EXISTING PLAYBOOK'
+          Write-Host 'NEW PLAYBOOK CONFIGURATION'
           Write-Host '========================================'
-          Write-Host "Category    : $category"
-          Write-Host "Test Plan   : $testPlanName"
-          Write-Host "Playbook ID : $playbookId"
-          Write-Host "Target ECU  : $env:TARGET_ECU"
+          Write-Host "Category      : $category"
+          Write-Host "Test Plan     : $testPlanName"
+          Write-Host "Playbook Name : $playbookName"
+          Write-Host "Project       : $projectRelativePath"
+          Write-Host "Resource      : $resource"
+          Write-Host "Target ECU    : $env:TARGET_ECU"
 
           if (
               $env:CATEGORY_INPUT -eq
               'Diagnostic_Test'
           ) {
               Write-Host (
-                  'RAL path will be passed as a constant: ' +
+                  'RAL path string: ' +
                   "$env:RAL_FILE_LOCATION"
               )
           }
@@ -493,7 +548,7 @@ jobs:
               'Bootloader_Compliance_Test'
           ) {
               Write-Host (
-                  'Flash path will be passed as a constant: ' +
+                  'Flash path string: ' +
                   "$env:FLASH_ARCHIVE_LOCATION"
               )
           }
@@ -501,16 +556,16 @@ jobs:
           Write-Host '========================================'
 
       # ============================================================
-      # 3. EXECUTE EXISTING PLAYBOOK
+      # 3. GENERATE ONE NEW PLAYBOOK JSON
       #
-      # Only string constants are passed.
-      # No RAL/HEX files are sent from the runner.
+      # ECU, RAL and Flash paths are added to this new playbook
+      # as constants and parameters.
+      #
+      # No RAL or HEX files are read or transferred.
       # ============================================================
 
-      - name: Execute selected TestGuide playbook
+      - name: Generate new TestGuide playbook
         shell: pwsh
-        env:
-          ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
 
         run: |
           $ErrorActionPreference = 'Stop'
@@ -537,12 +592,411 @@ jobs:
               )
           }
 
+          $targetEcuExpression = (
+              "'" +
+              $env:TARGET_ECU +
+              "'"
+          )
+
+          $constants = @(
+              [ordered]@{
+                  label =
+                      'PROJECT_GENERATOR_TARGETECU'
+
+                  value =
+                      $targetEcuExpression
+              },
+
+              [ordered]@{
+                  label =
+                      'PROJECT_GENERATOR_CT'
+
+                  value =
+                      'True'
+              }
+          )
+
+          $parameters = @(
+              [ordered]@{
+                  label =
+                      'PROJECT_GENERATOR_TARGETECU'
+
+                  defaultValue =
+                      $targetEcuExpression
+
+                  required =
+                      $false
+              },
+
+              [ordered]@{
+                  label =
+                      'PROJECT_GENERATOR_CT'
+
+                  defaultValue =
+                      'True'
+
+                  required =
+                      $false
+              }
+          )
+
+          if (
+              $env:CATEGORY_INPUT -eq
+              'Diagnostic_Test'
+          ) {
+              $ralExpression =
+                  Convert-ToEcuTestPathExpression `
+                      -Path $env:RAL_FILE_LOCATION
+
+              $constants +=
+                  [ordered]@{
+                      label =
+                          'PROJECT_GENERATOR_RAL_FILE_PATH'
+
+                      value =
+                          $ralExpression
+                  }
+
+              $parameters +=
+                  [ordered]@{
+                      label =
+                          'PROJECT_GENERATOR_RAL_FILE_PATH'
+
+                      defaultValue =
+                          $ralExpression
+
+                      required =
+                          $false
+                  }
+
+              Write-Host (
+                  'Diagnostic RAL constant: ' +
+                  "$ralExpression"
+              )
+          }
+
+          if (
+              $env:CATEGORY_INPUT -eq
+              'Bootloader_Compliance_Test'
+          ) {
+              $flashExpression =
+                  Convert-ToEcuTestPathExpression `
+                      -Path $env:FLASH_ARCHIVE_LOCATION
+
+              $constants +=
+                  [ordered]@{
+                      label =
+                          'PROJECT_GENERATOR_BL_COMPLIANCE_FILE_PATH'
+
+                      value =
+                          $flashExpression
+                  }
+
+              $parameters +=
+                  [ordered]@{
+                      label =
+                          'PROJECT_GENERATOR_BL_COMPLIANCE_FILE_PATH'
+
+                      defaultValue =
+                          $flashExpression
+
+                      required =
+                          $false
+                  }
+
+              Write-Host (
+                  'Bootloader Flash constant: ' +
+                  "$flashExpression"
+              )
+          }
+
+          $playbook = [ordered]@{
+              metadata = [ordered]@{
+                  name =
+                      $env:PLAYBOOK_NAME
+
+                  taskNameTemplate =
+                      '${playbook_name} (${playbook_datetime}) ${distribution_count}'
+
+                  labels =
+                      @()
+              }
+
+              workspace = [ordered]@{
+                  source = [ordered]@{
+                      path =
+                          $env:TESTGUIDE_WORKSPACE
+
+                      sourceType =
+                          'location'
+                  }
+
+                  dependencies =
+                      @()
+              }
+
+              setup = [ordered]@{
+                  steps = @(
+                      [ordered]@{
+                          reuse =
+                              'always'
+
+                          keepConfiguration =
+                              $false
+
+                          waitMinutesForLicense =
+                              0
+
+                          stepName =
+                              "ecu.test $env:RESOURCE_NAME Start"
+
+                          type =
+                              'ecuTestStart'
+                      },
+
+                      [ordered]@{
+                          tbcPath =
+                              $env:TBC_RELATIVE_PATH
+
+                          tcfPath =
+                              $env:TCF_RELATIVE_PATH
+
+                          stepName =
+                              'Test Configuration Selection'
+
+                          type =
+                              'configuration'
+                      }
+                  )
+              }
+
+              execution = [ordered]@{
+                  testcases = @(
+                      [ordered]@{
+                          relativePath =
+                              $env:PROJECT_RELATIVE_PATH
+
+                          constants =
+                              $constants
+
+                          stepName =
+                              "ecu.test $env:RESOURCE_NAME Start"
+
+                          type =
+                              'project'
+                      }
+                  )
+              }
+
+              teardown = [ordered]@{
+                  steps = @(
+                      [ordered]@{
+                          type =
+                              'ecuTestStop'
+                      }
+                  )
+              }
+
+              xilConfigRequirements = @(
+                  [ordered]@{
+                      label =
+                          'Identifier'
+
+                      category =
+                          'XIL'
+
+                      value =
+                          $env:XIL_IDENTIFIER
+
+                      type =
+                          'configuration'
+                  }
+              )
+
+              parameters =
+                  $parameters
+          }
+
+          $playbookFile =
+              Join-Path `
+                  -Path $env:ARTIFACT_ROOT `
+                  -ChildPath 'playbook.json'
+
+          $playbookJson =
+              $playbook |
+                  ConvertTo-Json -Depth 30
+
+          $playbookJson |
+              Set-Content `
+                  -LiteralPath $playbookFile `
+                  -Encoding utf8
+
+          "PLAYBOOK_FILE=$playbookFile" |
+              Out-File `
+                  -FilePath $env:GITHUB_ENV `
+                  -Append `
+                  -Encoding utf8
+
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'NEW PLAYBOOK JSON'
+          Write-Host '========================================'
+          Write-Host "File: $playbookFile"
+          Write-Host 'Constants:'
+
+          Write-Host (
+              $constants |
+                  ConvertTo-Json -Depth 20
+          )
+
+          Write-Host 'Parameters:'
+
+          Write-Host (
+              $parameters |
+                  ConvertTo-Json -Depth 20
+          )
+
+          Write-Host '========================================'
+
+      # ============================================================
+      # 4. CREATE THE NEW PLAYBOOK
+      # ============================================================
+
+      - name: Create new TestGuide playbook
+        shell: pwsh
+        env:
+          ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+
+        run: |
+          $ErrorActionPreference = 'Stop'
+
           if (-not $env:ONECX_AUTH_KEY) {
               throw 'ONECX_AUTH_KEY is missing.'
           }
 
           if (-not $env:ONECX_PROJECT_ID) {
               throw 'ONECX_PROJECT_ID is missing.'
+          }
+
+          if (-not $env:PLAYBOOK_FILE) {
+              throw 'PLAYBOOK_FILE is missing.'
+          }
+
+          $headers = @{
+              'TestGuide-AuthKey' =
+                  $env:ONECX_AUTH_KEY
+
+              Accept =
+                  'application/json'
+          }
+
+          $createUrl = (
+              "$env:ONECX_URL/api/v2/execution/playbook" +
+              "?projectId=$env:ONECX_PROJECT_ID" +
+              "&folder=%2F"
+          )
+
+          $requestBody =
+              Get-Content `
+                  -LiteralPath $env:PLAYBOOK_FILE `
+                  -Raw
+
+          $createResponse =
+              Invoke-RestMethod `
+                  -Method Post `
+                  -Uri $createUrl `
+                  -Headers $headers `
+                  -ContentType 'application/json' `
+                  -Body $requestBody `
+                  -ErrorAction Stop
+
+          $createResponse |
+              ConvertTo-Json -Depth 30 |
+              Set-Content `
+                  -LiteralPath (
+                      Join-Path `
+                          -Path $env:ARTIFACT_ROOT `
+                          -ChildPath 'create-response.json'
+                  ) `
+                  -Encoding utf8
+
+          $newPlaybookId =
+              $null
+
+          if ($createResponse.playbookId) {
+              $newPlaybookId =
+                  $createResponse.playbookId
+          }
+          elseif ($createResponse.id) {
+              $newPlaybookId =
+                  $createResponse.id
+          }
+          elseif (
+              $createResponse.data -and
+              $createResponse.data.playbookId
+          ) {
+              $newPlaybookId =
+                  $createResponse.data.playbookId
+          }
+          elseif (
+              $createResponse.data -and
+              $createResponse.data.id
+          ) {
+              $newPlaybookId =
+                  $createResponse.data.id
+          }
+
+          if (-not $newPlaybookId) {
+              Write-Host (
+                  $createResponse |
+                      ConvertTo-Json -Depth 30
+              )
+
+              throw (
+                  'Create API returned no new playbook ID.'
+              )
+          }
+
+          "TESTGUIDE_PLAYBOOK_ID=$newPlaybookId" |
+              Out-File `
+                  -FilePath $env:GITHUB_ENV `
+                  -Append `
+                  -Encoding utf8
+
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'NEW PLAYBOOK CREATED'
+          Write-Host '========================================'
+          Write-Host "Playbook Name : $env:PLAYBOOK_NAME"
+          Write-Host "Playbook ID   : $newPlaybookId"
+          Write-Host '========================================'
+
+      # ============================================================
+      # 5. EXECUTE THAT SAME NEW PLAYBOOK
+      # ============================================================
+
+      - name: Execute newly created TestGuide playbook
+        shell: pwsh
+        env:
+          ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
+
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          function Convert-ToEcuTestPathExpression {
+              param(
+                  [Parameter(Mandatory = $true)]
+                  [string]$Path
+              )
+
+              $cleanPath =
+                  $Path.Trim().Trim('"')
+
+              return (
+                  '"' +
+                  $cleanPath.Replace('\', '\\') +
+                  '"'
+              )
           }
 
           if (-not $env:TESTGUIDE_PLAYBOOK_ID) {
@@ -571,17 +1025,15 @@ jobs:
               $env:CATEGORY_INPUT -eq
               'Diagnostic_Test'
           ) {
-              $ralExpression =
-                  Convert-ToEcuTestPathExpression `
-                      -Path $env:RAL_FILE_LOCATION
-
               $executionParameters +=
                   [ordered]@{
                       label =
                           'PROJECT_GENERATOR_RAL_FILE_PATH'
 
-                      value =
-                          $ralExpression
+                      value = (
+                          Convert-ToEcuTestPathExpression `
+                              -Path $env:RAL_FILE_LOCATION
+                      )
                   }
           }
 
@@ -589,17 +1041,15 @@ jobs:
               $env:CATEGORY_INPUT -eq
               'Bootloader_Compliance_Test'
           ) {
-              $flashExpression =
-                  Convert-ToEcuTestPathExpression `
-                      -Path $env:FLASH_ARCHIVE_LOCATION
-
               $executionParameters +=
                   [ordered]@{
                       label =
                           'PROJECT_GENERATOR_BL_COMPLIANCE_FILE_PATH'
 
-                      value =
-                          $flashExpression
+                      value = (
+                          Convert-ToEcuTestPathExpression `
+                              -Path $env:FLASH_ARCHIVE_LOCATION
+                      )
                   }
           }
 
@@ -618,7 +1068,7 @@ jobs:
               "&checkLastExecution=true"
           )
 
-          $body = @{
+          $requestBody = @{
               parameters =
                   $executionParameters
           } |
@@ -626,12 +1076,12 @@ jobs:
 
           Write-Host ''
           Write-Host '========================================'
-          Write-Host 'TESTGUIDE EXECUTION INPUT'
+          Write-Host 'EXECUTING NEW PLAYBOOK'
           Write-Host '========================================'
           Write-Host "Playbook ID : $env:TESTGUIDE_PLAYBOOK_ID"
           Write-Host "Category    : $env:CATEGORY_INPUT"
           Write-Host "Target ECU  : $env:TARGET_ECU"
-          Write-Host 'Constants:'
+          Write-Host 'Parameters:'
 
           Write-Host (
               $executionParameters |
@@ -640,16 +1090,16 @@ jobs:
 
           Write-Host '========================================'
 
-          $response =
+          $executeResponse =
               Invoke-RestMethod `
                   -Method Post `
                   -Uri $executeUrl `
                   -Headers $headers `
                   -ContentType 'application/json' `
-                  -Body $body `
+                  -Body $requestBody `
                   -ErrorAction Stop
 
-          $response |
+          $executeResponse |
               ConvertTo-Json -Depth 30 |
               Set-Content `
                   -LiteralPath (
@@ -659,61 +1109,76 @@ jobs:
                   ) `
                   -Encoding utf8
 
-          $taskId =
+          $executionTaskId =
               $null
 
-          if ($response.taskIds) {
-              $taskId =
-                  @($response.taskIds)[0]
+          if ($executeResponse.taskIds) {
+              $executionTaskId =
+                  @($executeResponse.taskIds)[0]
           }
-          elseif ($response.taskId) {
-              $taskId =
-                  $response.taskId
+          elseif ($executeResponse.taskId) {
+              $executionTaskId =
+                  $executeResponse.taskId
           }
-          elseif ($response.id) {
-              $taskId =
-                  $response.id
-          }
-          elseif (
-              $response.data -and
-              $response.data.taskIds
-          ) {
-              $taskId =
-                  @($response.data.taskIds)[0]
+          elseif ($executeResponse.id) {
+              $executionTaskId =
+                  $executeResponse.id
           }
           elseif (
-              $response.data -and
-              $response.data.taskId
+              $executeResponse.data -and
+              $executeResponse.data.taskIds
           ) {
-              $taskId =
-                  $response.data.taskId
+              $executionTaskId =
+                  @($executeResponse.data.taskIds)[0]
+          }
+          elseif (
+              $executeResponse.data -and
+              $executeResponse.data.taskId
+          ) {
+              $executionTaskId =
+                  $executeResponse.data.taskId
           }
 
-          if (-not $taskId) {
+          if (-not $executionTaskId) {
+              Write-Host (
+                  $executeResponse |
+                      ConvertTo-Json -Depth 30
+              )
+
               throw (
                   'Execute API returned no execution task ID.'
               )
           }
 
-          "TESTGUIDE_TASK_ID=$taskId" |
+          "TESTGUIDE_TASK_ID=$executionTaskId" |
               Out-File `
                   -FilePath $env:GITHUB_ENV `
                   -Append `
                   -Encoding utf8
 
-          Write-Host "Execution task ID: $taskId"
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'NEW PLAYBOOK EXECUTION STARTED'
+          Write-Host '========================================'
+          Write-Host "Created Playbook ID : $env:TESTGUIDE_PLAYBOOK_ID"
+          Write-Host "Execution Task ID   : $executionTaskId"
+          Write-Host '========================================'
 
       # ============================================================
-      # 4. POLL EXECUTION TASK
+      # 6. POLL ONLY THE TASK RETURNED BY THIS EXECUTION
       # ============================================================
 
-      - name: Wait for TestGuide execution task
+      - name: Wait for new playbook execution task
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
 
         run: |
           $ErrorActionPreference = 'Stop'
+
+          if (-not $env:TESTGUIDE_TASK_ID) {
+              throw 'TESTGUIDE_TASK_ID is missing.'
+          }
 
           $headers = @{
               'TestGuide-AuthKey' =
@@ -754,6 +1219,15 @@ jobs:
 
           $attempt =
               0
+
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'POLLING NEW PLAYBOOK EXECUTION'
+          Write-Host '========================================'
+          Write-Host "Playbook ID : $env:TESTGUIDE_PLAYBOOK_ID"
+          Write-Host "Task ID     : $env:TESTGUIDE_TASK_ID"
+          Write-Host "Task URL    : $taskUrl"
+          Write-Host '========================================'
 
           while ((Get-Date) -lt $deadline) {
               $attempt++
@@ -889,12 +1363,14 @@ jobs:
 
                   Write-Host ''
                   Write-Host '========================================'
-                  Write-Host 'EXECUTION COMPLETE'
+                  Write-Host 'NEW PLAYBOOK EXECUTION COMPLETE'
                   Write-Host '========================================'
-                  Write-Host "State   : $state"
-                  Write-Host "Verdict : $verdict"
-                  Write-Host "Start   : $startDate"
-                  Write-Host "End     : $endDate"
+                  Write-Host "Playbook ID : $env:TESTGUIDE_PLAYBOOK_ID"
+                  Write-Host "Task ID     : $env:TESTGUIDE_TASK_ID"
+                  Write-Host "State       : $state"
+                  Write-Host "Verdict     : $verdict"
+                  Write-Host "Start       : $startDate"
+                  Write-Host "End         : $endDate"
                   Write-Host '========================================'
 
                   exit 0
@@ -908,7 +1384,7 @@ jobs:
           )
 
       # ============================================================
-      # 5. FIND REPORT FOR THE FULL UTC DAY
+      # 7. FIND REPORT FOR THE FULL UTC EXECUTION DAY
       #
       # Confirmed endpoint:
       # /api/report/reports/history
@@ -926,10 +1402,6 @@ jobs:
               throw 'TASK_START_DATE is missing.'
           }
 
-          if (-not $env:TASK_END_DATE) {
-              throw 'TASK_END_DATE is missing.'
-          }
-
           $headers = @{
               'TestGuide-AuthKey' =
                   $env:ONECX_AUTH_KEY
@@ -937,14 +1409,6 @@ jobs:
               Accept =
                   'application/json'
           }
-
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'PARSING EXECUTION DATES'
-          Write-Host '========================================'
-          Write-Host "Raw Start : $env:TASK_START_DATE"
-          Write-Host "Raw End   : $env:TASK_END_DATE"
-          Write-Host '========================================'
 
           try {
               $executionStart =
@@ -1100,7 +1564,7 @@ jobs:
                       }
 
                       $differenceSeconds =
-                          :MaxValue
+                          :PositiveInfinity
 
                       if (
                           $reportExecutionDate -ne
@@ -1189,14 +1653,12 @@ jobs:
           Write-Host '========================================'
           Write-Host "Report ID      : $reportId"
           Write-Host "Test Plan      : $($selectedReport.testPlanName)"
-          Write-Host "Status         : $($selectedReport.status)"
           Write-Host "Execution Date : $($selectedReport.executionDate)"
           Write-Host "Upload Date    : $($selectedReport.uploadDate)"
-          Write-Host "File Size      : $($selectedReport.fileSize)"
           Write-Host '========================================'
 
       # ============================================================
-      # 6. START ATX EXPORT
+      # 8. START ATX EXPORT
       # ============================================================
 
       - name: Start ATX export
@@ -1206,10 +1668,6 @@ jobs:
 
         run: |
           $ErrorActionPreference = 'Stop'
-
-          if (-not $env:TESTGUIDE_REPORT_ID) {
-              throw 'TESTGUIDE_REPORT_ID is missing.'
-          }
 
           $headers = @{
               'TestGuide-AuthKey' =
@@ -1232,11 +1690,6 @@ jobs:
                   -Headers $headers `
                   -ContentType 'application/json' `
                   -ErrorAction Stop
-
-          Write-Host (
-              $response |
-                  ConvertTo-Json -Depth 20
-          )
 
           $exportTaskId =
               $null
@@ -1273,6 +1726,11 @@ jobs:
           }
 
           if (-not $exportTaskId) {
+              Write-Host (
+                  $response |
+                      ConvertTo-Json -Depth 20
+              )
+
               throw (
                   'ATX export response contains no task ID.'
               )
@@ -1287,7 +1745,7 @@ jobs:
           Write-Host "ATX export task ID: $exportTaskId"
 
       # ============================================================
-      # 7. POLL ATX EXPORT
+      # 9. POLL ATX EXPORT
       # ============================================================
 
       - name: Wait for ATX export
@@ -1399,7 +1857,7 @@ jobs:
           throw 'ATX export polling exceeded 30 minutes.'
 
       # ============================================================
-      # 8. DOWNLOAD GENERATED ATX
+      # 10. DOWNLOAD GENERATED ATX
       # ============================================================
 
       - name: Download generated ATX
@@ -1468,7 +1926,7 @@ jobs:
           Write-Host "Downloaded ATX: $destination"
 
       # ============================================================
-      # 9. BUILD JFROG DESTINATION
+      # 11. BUILD JFROG DESTINATION
       # ============================================================
 
       - name: Build JFrog destination
@@ -1540,7 +1998,7 @@ jobs:
           Write-Host "JFrog target: $targetPath"
 
       # ============================================================
-      # 10. UPLOAD ONLY THE GENERATED ATX TO JFROG
+      # 12. UPLOAD ONLY GENERATED ATX TO JFROG
       # ============================================================
 
       - name: Upload generated ATX to JFrog
@@ -1637,7 +2095,7 @@ jobs:
           Write-Host "JFrog ATX URL: $uploadUrl"
 
       # ============================================================
-      # 11. ADD JFROG ATX LOCATION TO JIRA
+      # 13. ADD JFROG LOCATION TO JIRA
       # ============================================================
 
       - name: Add ATX location to Jira
@@ -1675,7 +2133,7 @@ jobs:
               "CW Release: $env:CW_RELEASE`n" +
               "Target ECU: $env:TARGET_ECU`n" +
               "Test Bench: $env:TEST_BENCH`n`n" +
-              "Playbook ID: $env:TESTGUIDE_PLAYBOOK_ID`n" +
+              "New Playbook ID: $env:TESTGUIDE_PLAYBOOK_ID`n" +
               "Execution Task ID: $env:TESTGUIDE_TASK_ID`n" +
               "Execution State: $env:TESTGUIDE_STATE`n" +
               "Execution Verdict: $env:TESTGUIDE_VERDICT`n" +
@@ -1730,7 +2188,7 @@ jobs:
           Write-Host "Jira comment added to $env:JIRA_KEY."
 
       # ============================================================
-      # 12. RETAIN GENERATED ATX AND API RESPONSES
+      # 14. RETAIN GENERATED ATX AND API RESPONSES
       # ============================================================
 
       - name: Upload ATX and diagnostics to GitHub
