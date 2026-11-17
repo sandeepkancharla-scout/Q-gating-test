@@ -177,23 +177,19 @@ jobs:
 
           switch ($categoryInput.ToLowerInvariant()) {
               'network_test' {
-                  $categoryInput =
-                      'Network_Test'
+                  $categoryInput = 'Network_Test'
               }
 
               'network_testing' {
-                  $categoryInput =
-                      'Network_Test'
+                  $categoryInput = 'Network_Test'
               }
 
               'diagnostic_test' {
-                  $categoryInput =
-                      'Diagnostic_Test'
+                  $categoryInput = 'Diagnostic_Test'
               }
 
               'diagnostic_testing' {
-                  $categoryInput =
-                      'Diagnostic_Test'
+                  $categoryInput = 'Diagnostic_Test'
               }
 
               'bootloader_compliance_test' {
@@ -282,11 +278,7 @@ jobs:
           Write-Host '========================================'
 
       # ============================================================
-      # 2. ROUTE CATEGORY AND PREPARE NEW PLAYBOOK
-      #
-      # No GitHub checkout.
-      # No RAL or HEX file validation.
-      # RAL and HEX values remain strings only.
+      # 2. ROUTE CATEGORY AND PREPARE PLAYBOOK
       # ============================================================
 
       - name: Route category and prepare playbook
@@ -387,9 +379,6 @@ jobs:
               )
           }
 
-          # Validate only workflow/project configuration files.
-          # Do not validate Jira RAL or HEX input paths.
-
           $fullProjectPath =
               Join-Path `
                   -Path $workspace `
@@ -467,8 +456,7 @@ jobs:
               Out-Null
 
           $runTimestamp =
-              Get-Date `
-                  -Format 'yyyy-MM-dd_HHmmss'
+              Get-Date -Format 'yyyy-MM-dd_HHmmss'
 
           $playbookName = (
               "$playbookBaseName-" +
@@ -532,36 +520,10 @@ jobs:
           Write-Host "Project       : $projectRelativePath"
           Write-Host "Resource      : $resource"
           Write-Host "Target ECU    : $env:TARGET_ECU"
-
-          if (
-              $env:CATEGORY_INPUT -eq
-              'Diagnostic_Test'
-          ) {
-              Write-Host (
-                  'RAL path string: ' +
-                  "$env:RAL_FILE_LOCATION"
-              )
-          }
-
-          if (
-              $env:CATEGORY_INPUT -eq
-              'Bootloader_Compliance_Test'
-          ) {
-              Write-Host (
-                  'Flash path string: ' +
-                  "$env:FLASH_ARCHIVE_LOCATION"
-              )
-          }
-
           Write-Host '========================================'
 
       # ============================================================
-      # 3. GENERATE ONE NEW PLAYBOOK JSON
-      #
-      # ECU, RAL and Flash paths are added to this new playbook
-      # as constants and parameters.
-      #
-      # No RAL or HEX files are read or transferred.
+      # 3. GENERATE PLAYBOOK JSON
       # ============================================================
 
       - name: Generate new TestGuide playbook
@@ -580,23 +542,13 @@ jobs:
                   $Path.Trim().Trim('"')
 
               $escapedPath =
-                  $cleanPath.Replace(
-                      '\',
-                      '\\'
-                  )
+                  $cleanPath.Replace('\', '\\')
 
-              return (
-                  '"' +
-                  $escapedPath +
-                  '"'
-              )
+              return '"' + $escapedPath + '"'
           }
 
-          $targetEcuExpression = (
-              "'" +
-              $env:TARGET_ECU +
-              "'"
-          )
+          $targetEcuExpression =
+              "'" + $env:TARGET_ECU + "'"
 
           $constants = @(
               [ordered]@{
@@ -668,11 +620,6 @@ jobs:
                       required =
                           $false
                   }
-
-              Write-Host (
-                  'Diagnostic RAL constant: ' +
-                  "$ralExpression"
-              )
           }
 
           if (
@@ -703,11 +650,6 @@ jobs:
                       required =
                           $false
                   }
-
-              Write-Host (
-                  'Bootloader Flash constant: ' +
-                  "$flashExpression"
-              )
           }
 
           $playbook = [ordered]@{
@@ -822,11 +764,8 @@ jobs:
                   -Path $env:ARTIFACT_ROOT `
                   -ChildPath 'playbook.json'
 
-          $playbookJson =
-              $playbook |
-                  ConvertTo-Json -Depth 30
-
-          $playbookJson |
+          $playbook |
+              ConvertTo-Json -Depth 30 |
               Set-Content `
                   -LiteralPath $playbookFile `
                   -Encoding utf8
@@ -837,29 +776,10 @@ jobs:
                   -Append `
                   -Encoding utf8
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'NEW PLAYBOOK JSON'
-          Write-Host '========================================'
-          Write-Host "File: $playbookFile"
-          Write-Host 'Constants:'
-
-          Write-Host (
-              $constants |
-                  ConvertTo-Json -Depth 20
-          )
-
-          Write-Host 'Parameters:'
-
-          Write-Host (
-              $parameters |
-                  ConvertTo-Json -Depth 20
-          )
-
-          Write-Host '========================================'
+          Write-Host "Playbook file: $playbookFile"
 
       # ============================================================
-      # 4. CREATE THE NEW PLAYBOOK
+      # 4. CREATE PLAYBOOK
       # ============================================================
 
       - name: Create new TestGuide playbook
@@ -952,9 +872,7 @@ jobs:
                       ConvertTo-Json -Depth 30
               )
 
-              throw (
-                  'Create API returned no new playbook ID.'
-              )
+              throw 'Create API returned no playbook ID.'
           }
 
           "TESTGUIDE_PLAYBOOK_ID=$newPlaybookId" |
@@ -963,16 +881,10 @@ jobs:
                   -Append `
                   -Encoding utf8
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'NEW PLAYBOOK CREATED'
-          Write-Host '========================================'
-          Write-Host "Playbook Name : $env:PLAYBOOK_NAME"
-          Write-Host "Playbook ID   : $newPlaybookId"
-          Write-Host '========================================'
+          Write-Host "Created playbook ID: $newPlaybookId"
 
       # ============================================================
-      # 5. EXECUTE THAT SAME NEW PLAYBOOK
+      # 5. EXECUTE PLAYBOOK
       # ============================================================
 
       - name: Execute newly created TestGuide playbook
@@ -1074,22 +986,6 @@ jobs:
           } |
               ConvertTo-Json -Depth 20
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'EXECUTING NEW PLAYBOOK'
-          Write-Host '========================================'
-          Write-Host "Playbook ID : $env:TESTGUIDE_PLAYBOOK_ID"
-          Write-Host "Category    : $env:CATEGORY_INPUT"
-          Write-Host "Target ECU  : $env:TARGET_ECU"
-          Write-Host 'Parameters:'
-
-          Write-Host (
-              $executionParameters |
-                  ConvertTo-Json -Depth 20
-          )
-
-          Write-Host '========================================'
-
           $executeResponse =
               Invoke-RestMethod `
                   -Method Post `
@@ -1145,9 +1041,7 @@ jobs:
                       ConvertTo-Json -Depth 30
               )
 
-              throw (
-                  'Execute API returned no execution task ID.'
-              )
+              throw 'Execute API returned no task ID.'
           }
 
           "TESTGUIDE_TASK_ID=$executionTaskId" |
@@ -1156,16 +1050,10 @@ jobs:
                   -Append `
                   -Encoding utf8
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'NEW PLAYBOOK EXECUTION STARTED'
-          Write-Host '========================================'
-          Write-Host "Created Playbook ID : $env:TESTGUIDE_PLAYBOOK_ID"
-          Write-Host "Execution Task ID   : $executionTaskId"
-          Write-Host '========================================'
+          Write-Host "Execution task ID: $executionTaskId"
 
       # ============================================================
-      # 6. POLL ONLY THE TASK RETURNED BY THIS EXECUTION
+      # 6. POLL EXECUTION TASK
       # ============================================================
 
       - name: Wait for new playbook execution task
@@ -1220,15 +1108,6 @@ jobs:
           $attempt =
               0
 
-          Write-Host ''
-          Write-Host '========================================'
-          Write-Host 'POLLING NEW PLAYBOOK EXECUTION'
-          Write-Host '========================================'
-          Write-Host "Playbook ID : $env:TESTGUIDE_PLAYBOOK_ID"
-          Write-Host "Task ID     : $env:TESTGUIDE_TASK_ID"
-          Write-Host "Task URL    : $taskUrl"
-          Write-Host '========================================'
-
           while ((Get-Date) -lt $deadline) {
               $attempt++
 
@@ -1275,23 +1154,15 @@ jobs:
                       -Encoding utf8
 
               if (-not $state) {
-                  Write-Host (
-                      $task |
-                          ConvertTo-Json -Depth 30
-                  )
-
                   throw (
-                      'Execution-task API returned no state. ' +
-                      "Task=$env:TESTGUIDE_TASK_ID"
+                      'Execution-task API returned no state.'
                   )
               }
 
               if ($state -in $failureStates) {
                   $safeStateInfo =
                       (
-                          $stateInfo -replace
-                          '[\r\n]+',
-                          ' '
+                          $stateInfo -replace '[\r\n]+', ' '
                       ).Trim()
 
                   "TESTGUIDE_STATE=$state" |
@@ -1361,17 +1232,10 @@ jobs:
                           -Append `
                           -Encoding utf8
 
-                  Write-Host ''
-                  Write-Host '========================================'
-                  Write-Host 'NEW PLAYBOOK EXECUTION COMPLETE'
-                  Write-Host '========================================'
-                  Write-Host "Playbook ID : $env:TESTGUIDE_PLAYBOOK_ID"
-                  Write-Host "Task ID     : $env:TESTGUIDE_TASK_ID"
-                  Write-Host "State       : $state"
-                  Write-Host "Verdict     : $verdict"
-                  Write-Host "Start       : $startDate"
-                  Write-Host "End         : $endDate"
-                  Write-Host '========================================'
+                  Write-Host (
+                      "Execution complete. " +
+                      "State=$state Verdict=$verdict"
+                  )
 
                   exit 0
               }
@@ -1379,15 +1243,10 @@ jobs:
               Start-Sleep -Seconds 15
           }
 
-          throw (
-              'Execution polling exceeded 180 minutes.'
-          )
+          throw 'Execution polling exceeded 180 minutes.'
 
       # ============================================================
-      # 7. FIND REPORT FOR THE FULL UTC EXECUTION DAY
-      #
-      # Confirmed endpoint:
-      # /api/report/reports/history
+      # 7. FIND REPORT
       # ============================================================
 
       - name: Find TestGuide report
@@ -1563,8 +1422,9 @@ jobs:
                           }
                       }
 
+                      # Correct PowerShell positive infinity value.
                       $differenceSeconds =
-                          [double]::PositiveInfinity
+                          :PositiveInfinity
 
                       if (
                           $reportExecutionDate -ne
@@ -1756,6 +1616,10 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
+          if (-not $env:ATX_EXPORT_TASK_ID) {
+              throw 'ATX_EXPORT_TASK_ID is missing.'
+          }
+
           $headers = @{
               'TestGuide-AuthKey' =
                   $env:ONECX_AUTH_KEY
@@ -1768,6 +1632,24 @@ jobs:
               "$env:ONECX_URL/api/report/export/atx/" +
               "$env:ATX_EXPORT_TASK_ID/status" +
               "?projectId=$env:ONECX_PROJECT_ID"
+          )
+
+          $successStates = @(
+              'FINISHED',
+              'COMPLETE',
+              'COMPLETED',
+              'SUCCESS',
+              'SUCCEEDED',
+              'DONE'
+          )
+
+          $failureStates = @(
+              'FAILED',
+              'FAILURE',
+              'ERROR',
+              'ABORTED',
+              'CANCELLED',
+              'CANCELED'
           )
 
           $deadline =
@@ -1787,6 +1669,102 @@ jobs:
                       -ErrorAction Stop
 
               if ($response -is [string]) {
+                  $responseJson =
+                      "$response"
+              }
+              else {
+                  $responseJson =
+                      $response |
+                          ConvertTo-Json `
+                              -Compress `
+                              -Depth 20
+              }
+
+              Write-Host (
+                  "ATX attempt=$attempt " +
+                  "Response=$responseJson"
+              )
+
+              # TestGuide response:
+              # {
+              #   "name": "Export report to ATX",
+              #   "progressinfo": null,
+              #   "done": true
+              # }
+
+              if (
+                  $response -isnot [string] -and
+                  $null -ne
+                      $response.PSObject.Properties['done']
+              ) {
+                  $doneValue =
+                      $response.PSObject.Properties['done'].Value
+
+                  if ($doneValue -is [bool]) {
+                      $done =
+                          $doneValue
+                  }
+                  else {
+                      $done =
+                          $false
+
+                      $doneParsed =
+                          :TryParse(
+                              "$doneValue",
+                              [ref]$done
+                          )
+
+                      if (-not $doneParsed) {
+                          throw (
+                              'Invalid ATX done value. ' +
+                              "Value=[$doneValue]; " +
+                              "Response=$responseJson"
+                          )
+                      }
+                  }
+
+                  Write-Host (
+                      "ATX Attempt=$attempt " +
+                      "Done=$done " +
+                      "Name=$($response.name)"
+                  )
+
+                  if ($done) {
+                      Write-Host ''
+                      Write-Host '========================================'
+                      Write-Host 'ATX EXPORT COMPLETE'
+                      Write-Host '========================================'
+                      Write-Host (
+                          "Export Task ID : " +
+                          "$env:ATX_EXPORT_TASK_ID"
+                      )
+                      Write-Host "Name           : $($response.name)"
+                      Write-Host "Done           : $done"
+                      Write-Host '========================================'
+
+                      exit 0
+                  }
+
+                  if ($response.progressinfo) {
+                      Write-Host (
+                          'ATX export still running. ' +
+                          "Progress=$($response.progressinfo)"
+                      )
+                  }
+                  else {
+                      Write-Host (
+                          'ATX export still running. Done=false'
+                      )
+                  }
+
+                  Start-Sleep -Seconds 5
+                  continue
+              }
+
+              $state =
+                  ''
+
+              if ($response -is [string]) {
                   $state =
                       "$response".
                           Trim().
@@ -1804,60 +1782,36 @@ jobs:
                           Trim().
                           ToUpperInvariant()
               }
-              else {
-                  $state =
-                      ''
-              }
 
-              Write-Host (
-                  "ATX Attempt=$attempt State=$state"
-              )
-
-              if (
-                  $state -in @(
-                      'FINISHED',
-                      'COMPLETE',
-                      'COMPLETED',
-                      'SUCCESS',
-                      'SUCCEEDED',
-                      'DONE'
+              if ($state) {
+                  Write-Host (
+                      "ATX Attempt=$attempt State=$state"
                   )
-              ) {
-                  exit 0
-              }
 
-              if (
-                  $state -in @(
-                      'FAILED',
-                      'FAILURE',
-                      'ERROR',
-                      'ABORTED',
-                      'CANCELLED',
-                      'CANCELED'
-                  )
-              ) {
-                  throw "ATX export failed. State=$state"
-              }
+                  if ($state -in $successStates) {
+                      exit 0
+                  }
 
-              if (-not $state) {
-                  throw (
-                      'Unable to determine ATX export state. ' +
-                      (
-                          $response |
-                              ConvertTo-Json `
-                                  -Compress `
-                                  -Depth 20
+                  if ($state -in $failureStates) {
+                      throw (
+                          "ATX export failed. State=$state"
                       )
-                  )
+                  }
+
+                  Start-Sleep -Seconds 5
+                  continue
               }
 
-              Start-Sleep -Seconds 5
+              throw (
+                  'Unable to determine ATX export state. ' +
+                  $responseJson
+              )
           }
 
           throw 'ATX export polling exceeded 30 minutes.'
 
       # ============================================================
-      # 10. DOWNLOAD GENERATED ATX
+      # 10. DOWNLOAD ATX
       # ============================================================
 
       - name: Download generated ATX
@@ -1882,10 +1836,13 @@ jobs:
               "?projectId=$env:ONECX_PROJECT_ID"
           )
 
+          $safeTargetEcu =
+              $env:TARGET_ECU -replace '[\\/:*?"<>|]', '_'
+
           $fileName = (
               "$env:TEST_PLAN_NAME" +
               "_" +
-              "$env:TARGET_ECU" +
+              "$safeTargetEcu" +
               "_" +
               "$env:RUN_TIMESTAMP" +
               ".atx"
@@ -1998,7 +1955,7 @@ jobs:
           Write-Host "JFrog target: $targetPath"
 
       # ============================================================
-      # 12. UPLOAD ONLY GENERATED ATX TO JFROG
+      # 12. UPLOAD ATX TO JFROG
       # ============================================================
 
       - name: Upload generated ATX to JFrog
@@ -2024,9 +1981,7 @@ jobs:
                   Trim('/').
                   Split('/') |
                   ForEach-Object {
-                      [System.Uri]::EscapeDataString(
-                          $_
-                      )
+                      [System.Uri]::EscapeDataString($_)
                   }
 
           $encodedTarget =
@@ -2188,7 +2143,7 @@ jobs:
           Write-Host "Jira comment added to $env:JIRA_KEY."
 
       # ============================================================
-      # 14. RETAIN GENERATED ATX AND API RESPONSES
+      # 14. RETAIN ATX AND DIAGNOSTICS
       # ============================================================
 
       - name: Upload ATX and diagnostics to GitHub
