@@ -1564,7 +1564,7 @@ jobs:
                       }
 
                       $differenceSeconds =
-                          :PositiveInfinity
+                          [double]::PositiveInfinity
 
                       if (
                           $reportExecutionDate -ne
