@@ -1385,12 +1385,10 @@ jobs:
       # This will show why DiagnosticTest gets Matching=0.
       # Bootloader and Network matching remain unchanged.
       # ============================================================
-
       - name: Find TestGuide report
         shell: pwsh
         env:
           ONECX_AUTH_KEY: ${{ secrets.ONECX_AUTH_KEY }}
-
         run: |
           $ErrorActionPreference = 'Stop'
 
@@ -1402,22 +1400,46 @@ jobs:
               throw 'TEST_PLAN_NAME is missing.'
           }
 
-          $headers = @{
-              'TestGuide-AuthKey' =
-                  $env:ONECX_AUTH_KEY
-
-              Accept =
-                  'application/json'
+          if (-not $env:ONECX_URL) {
+              throw 'ONECX_URL is missing.'
           }
 
+          if (-not $env:ONECX_PROJECT_ID) {
+              throw 'ONECX_PROJECT_ID is missing.'
+          }
+
+          if (-not $env:ONECX_AUTH_KEY) {
+              throw 'ONECX_AUTH_KEY is missing.'
+          }
+
+          $headers = @{
+              'TestGuide-AuthKey' = $env:ONECX_AUTH_KEY
+              'Accept'            = 'application/json'
+          }
+
+          # ----------------------------------------------------------
+          # Parse TASK_START_DATE and create a full UTC-day window.
+          # ----------------------------------------------------------
+
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'TASK START DATE DEBUG'
+          Write-Host '========================================'
+          Write-Host "Raw TASK_START_DATE : [$env:TASK_START_DATE]"
+          Write-Host "Runner local time   : [$((Get-Date).ToString('o'))]"
+          Write-Host "Runner UTC time     : [$(:UtcNow.ToString('o'))]"
+          Write-Host '========================================'
+
           try {
-              $executionStart =
-                  Get-Date `
-                      -Date $env:TASK_START_DATE `
-                      -ErrorAction Stop
+              $executionStartOffset =
+                  :Parse(
+                      $env:TASK_START_DATE,
+                      [System.Globalization.CultureInfo]::InvariantCulture,
+                      [System.Globalization.DateTimeStyles]::AllowWhiteSpaces
+                  )
 
               $executionStart =
-                  $executionStart.ToUniversalTime()
+                  $executionStartOffset.UtcDateTime
           }
           catch {
               throw (
@@ -1427,27 +1449,42 @@ jobs:
               )
           }
 
-          $dayStartText =
-              $executionStart.ToString(
-                  'yyyy-MM-ddT00:00:00Z'
-              )
-
           $dayStart =
-              Get-Date `
-                  -Date $dayStartText
+              :SpecifyKind(
+                  :new(
+                      $executionStart.Year,
+                      $executionStart.Month,
+                      $executionStart.Day,
+                      0,
+                      0,
+                      0
+                  ),
+                  :Utc
+              )
 
           $dayEnd =
               $dayStart.AddDays(1)
 
           $historyStart =
-              $dayStart.
-                  ToUniversalTime().
-                  ToString('yyyy-MM-ddTHH:mm:ssZ')
+              $dayStart.ToString(
+                  'yyyy-MM-ddTHH:mm:ssZ',
+                  [System.Globalization.CultureInfo]::InvariantCulture
+              )
 
           $historyEnd =
-              $dayEnd.
-                  ToUniversalTime().
-                  ToString('yyyy-MM-ddTHH:mm:ssZ')
+              $dayEnd.ToString(
+                  'yyyy-MM-ddTHH:mm:ssZ',
+                  [System.Globalization.CultureInfo]::InvariantCulture
+              )
+
+          Write-Host ''
+          Write-Host '========================================'
+          Write-Host 'CALCULATED REPORT HISTORY WINDOW'
+          Write-Host '========================================'
+          Write-Host "Parsed start UTC : [$($executionStart.ToString('o'))]"
+          Write-Host "History start    : [$historyStart]"
+          Write-Host "History end      : [$historyEnd]"
+          Write-Host '========================================'
 
           $encodedStart =
               [System.Uri]::EscapeDataString(
@@ -1480,48 +1517,50 @@ jobs:
           Write-Host "URL       : $historyUrl"
           Write-Host '========================================'
 
-          $selectedReport =
-              $null
+          $selectedReport = $null
 
           for (
               $attempt = 1;
               $attempt -le 20;
               $attempt++
           ) {
-              $historyResponse =
-                  Invoke-RestMethod `
-                      -Method Get `
-                      -Uri $historyUrl `
-                      -Headers $headers `
-                      -ErrorAction Stop
+              try {
+                  $historyResponse =
+                      Invoke-RestMethod `
+                          -Method Get `
+                          -Uri $historyUrl `
+                          -Headers $headers `
+                          -ErrorAction Stop
+              }
+              catch {
+                  throw (
+                      'Report History API request failed. ' +
+                      "Attempt=[$attempt]. " +
+                      "URL=[$historyUrl]. " +
+                      "Error=[$($_.Exception.Message)]"
+                  )
+              }
 
               if ($null -eq $historyResponse) {
-                  $allReports =
-                      @()
+                  $allReports = @()
               }
               elseif (
                   $null -ne
-                  $historyResponse.PSObject.Properties[
-                      'content'
-                  ]
+                  $historyResponse.PSObject.Properties['content']
               ) {
                   $allReports =
                       @($historyResponse.content)
               }
               elseif (
                   $null -ne
-                  $historyResponse.PSObject.Properties[
-                      'reports'
-                  ]
+                  $historyResponse.PSObject.Properties['reports']
               ) {
                   $allReports =
                       @($historyResponse.reports)
               }
               elseif (
                   $null -ne
-                  $historyResponse.PSObject.Properties[
-                      'data'
-                  ]
+                  $historyResponse.PSObject.Properties['data']
               ) {
                   $allReports =
                       @($historyResponse.data)
@@ -1531,9 +1570,9 @@ jobs:
                       @($historyResponse)
               }
 
-              # ----------------------------------------------------
-              # DEBUG: show everything before filtering.
-              # ----------------------------------------------------
+              # ------------------------------------------------------
+              # Debug: display all reports before filtering.
+              # ------------------------------------------------------
 
               Write-Host ''
               Write-Host '========================================'
@@ -1562,9 +1601,9 @@ jobs:
 
               Write-Host '========================================'
 
-              # ----------------------------------------------------
-              # Keep existing strict match for now.
-              # ----------------------------------------------------
+              # ------------------------------------------------------
+              # Strictly match COMPLETE status and exact test-plan name.
+              # ------------------------------------------------------
 
               $matchingReports =
                   @(
@@ -1580,11 +1619,8 @@ jobs:
                                       Trim()
 
                               (
-                                  $reportStatus -eq
-                                      'COMPLETE' -and
-
-                                  $reportPlan -eq
-                                      $env:TEST_PLAN_NAME
+                                  $reportStatus -eq 'COMPLETE' -and
+                                  $reportPlan -eq $env:TEST_PLAN_NAME
                               )
                           }
                   )
@@ -1596,28 +1632,34 @@ jobs:
 
               if ($matchingReports.Count -gt 0) {
                   $rankedReports =
-                      foreach (
-                          $report in $matchingReports
-                      ) {
+                      foreach ($report in $matchingReports) {
                           $differenceSeconds =
-                              999999999999999
+                              :MaxValue
 
                           $uploadDate =
-                              Get-Date `
-                                  -Date '1900-01-01T00:00:00Z'
+                              :SpecifyKind(
+                                  :new(
+                                      1900,
+                                      1,
+                                      1,
+                                      0,
+                                      0,
+                                      0
+                                  ),
+                                  :Utc
+                              )
 
                           if ($report.executionDate) {
                               try {
-                                  $reportExecutionDate =
-                                      Get-Date `
-                                          -Date (
-                                              "$($report.executionDate)"
-                                          ) `
-                                          -ErrorAction Stop
+                                  $reportExecutionOffset =
+                                      :Parse(
+                                          "$($report.executionDate)",
+                                          [System.Globalization.CultureInfo]::InvariantCulture,
+                                          [System.Globalization.DateTimeStyles]::AllowWhiteSpaces
+                                      )
 
                                   $reportExecutionDate =
-                                      $reportExecutionDate.
-                                          ToUniversalTime()
+                                      $reportExecutionOffset.UtcDateTime
 
                                   $differenceSeconds =
                                       [System.Math]::Abs(
@@ -1630,37 +1672,37 @@ jobs:
                               catch {
                                   Write-Host (
                                       'Could not parse executionDate: ' +
-                                      "$($report.executionDate)"
+                                      "[$($report.executionDate)]. " +
+                                      "Error=[$($_.Exception.Message)]"
                                   )
                               }
                           }
 
                           if ($report.uploadDate) {
                               try {
+                                  $uploadDateOffset =
+                                      :Parse(
+                                          "$($report.uploadDate)",
+                                          [System.Globalization.CultureInfo]::InvariantCulture,
+                                          [System.Globalization.DateTimeStyles]::AllowWhiteSpaces
+                                      )
+
                                   $uploadDate =
-                                      Get-Date `
-                                          -Date (
-                                              "$($report.uploadDate)"
-                                          ) `
-                                          -ErrorAction Stop
+                                      $uploadDateOffset.UtcDateTime
                               }
                               catch {
                                   Write-Host (
                                       'Could not parse uploadDate: ' +
-                                      "$($report.uploadDate)"
+                                      "[$($report.uploadDate)]. " +
+                                      "Error=[$($_.Exception.Message)]"
                                   )
                               }
                           }
 
                           [PSCustomObject]@{
-                              Report =
-                                  $report
-
-                              Difference =
-                                  $differenceSeconds
-
-                              UploadDate =
-                                  $uploadDate
+                              Report     = $report
+                              Difference = $differenceSeconds
+                              UploadDate = $uploadDate
                           }
                       }
 
@@ -1669,18 +1711,12 @@ jobs:
                           Sort-Object `
                               -Property @(
                                   @{
-                                      Expression =
-                                          'Difference'
-
-                                      Ascending =
-                                          $true
+                                      Expression = 'Difference'
+                                      Ascending  = $true
                                   },
                                   @{
-                                      Expression =
-                                          'UploadDate'
-
-                                      Descending =
-                                          $true
+                                      Expression = 'UploadDate'
+                                      Descending = $true
                                   }
                               ) |
                           Select-Object -First 1
@@ -1712,7 +1748,8 @@ jobs:
               throw (
                   'No COMPLETE report found for ' +
                   "[$env:TEST_PLAN_NAME] between " +
-                  "[$historyStart] and [$historyEnd]."
+                  "[$historyStart] and [$historyEnd]. " +
+                  "TASK_START_DATE=[$env:TASK_START_DATE]."
               )
           }
 
@@ -1725,18 +1762,14 @@ jobs:
                       ConvertTo-Json -Depth 30
               )
 
-              throw (
-                  'Selected report contains no reportId.'
-              )
+              throw 'Selected report contains no reportId.'
           }
 
           $reportId =
               ([string]$reportId).Trim()
 
           if (-not $reportId) {
-              throw (
-                  'Selected report contains an empty reportId.'
-              )
+              throw 'Selected report contains an empty reportId.'
           }
 
           "TESTGUIDE_REPORT_ID=$reportId" |
@@ -1755,7 +1788,7 @@ jobs:
           Write-Host "Execution Date : $($selectedReport.executionDate)"
           Write-Host "Upload Date    : $($selectedReport.uploadDate)"
           Write-Host '========================================'
-
+      
       # ============================================================
       # 8. START ATX EXPORT
       # ============================================================
