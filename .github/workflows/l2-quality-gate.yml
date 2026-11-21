@@ -1451,19 +1451,12 @@ jobs:
 
           $dayStart =
               [System.DateTime]::SpecifyKind(
-                  [System.DateTime]::new(
-                      $executionStart.Year,
-                      $executionStart.Month,
-                      $executionStart.Day,
-                      0,
-                      0,
-                      0
-                  ),
+                  [System.DateTime]::UtcNowDate,
                   [System.DateTimeKind]::Utc
               )
 
           $dayEnd =
-              $dayStart.AddDays(1)
+              $dayStart.AddDays(1).AddSeconds(-1)
 
           $historyStart =
               $dayStart.ToString(
