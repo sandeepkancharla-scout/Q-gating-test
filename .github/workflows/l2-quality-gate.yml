@@ -1451,7 +1451,7 @@ jobs:
 
           $dayStart =
               [System.DateTime]::SpecifyKind(
-                  [System.DateTime]::UtcNowDate,
+                  [System.DateTime]::UtcNow.Date,
                   [System.DateTimeKind]::Utc
               )
 
