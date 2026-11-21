@@ -1427,7 +1427,7 @@ jobs:
           Write-Host '========================================'
           Write-Host "Raw TASK_START_DATE : [$env:TASK_START_DATE]"
           Write-Host "Runner local time   : [$((Get-Date).ToString('o'))]"
-          Write-Host "Runner UTC time     : [$(:UtcNow.ToString('o'))]"
+          Write-Host "Runner UTC time     : $([DateTime]::UtcNow.ToString('o'))"
           Write-Host '========================================'
 
           try {
