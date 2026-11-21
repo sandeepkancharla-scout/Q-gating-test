@@ -1427,12 +1427,12 @@ jobs:
           Write-Host '========================================'
           Write-Host "Raw TASK_START_DATE : [$env:TASK_START_DATE]"
           Write-Host "Runner local time   : [$((Get-Date).ToString('o'))]"
-          Write-Host "Runner UTC time     : $([DateTime]::UtcNow.ToString('o'))"
+          Write-Host "Runner UTC time     : $([System.DateTime]::UtcNow.ToString('o'))"
           Write-Host '========================================'
 
           try {
               $executionStartOffset =
-                  :Parse(
+                  [System.DateTimeOffset]::Parse(
                       $env:TASK_START_DATE,
                       [System.Globalization.CultureInfo]::InvariantCulture,
                       [System.Globalization.DateTimeStyles]::AllowWhiteSpaces
@@ -1445,13 +1445,13 @@ jobs:
               throw (
                   'Unable to parse TASK_START_DATE. ' +
                   "Value=[$env:TASK_START_DATE]. " +
-                  "Error=$($_.Exception.Message)"
+                  "Error=[$($_.Exception.Message)]"
               )
           }
 
           $dayStart =
-              :SpecifyKind(
-                  :new(
+              [System.DateTime]::SpecifyKind(
+                  [System.DateTime]::new(
                       $executionStart.Year,
                       $executionStart.Month,
                       $executionStart.Day,
@@ -1459,7 +1459,7 @@ jobs:
                       0,
                       0
                   ),
-                  :Utc
+                  [System.DateTimeKind]::Utc
               )
 
           $dayEnd =
@@ -1634,11 +1634,11 @@ jobs:
                   $rankedReports =
                       foreach ($report in $matchingReports) {
                           $differenceSeconds =
-                              :MaxValue
+                              [System.Double]::MaxValue
 
                           $uploadDate =
-                              :SpecifyKind(
-                                  :new(
+                              [System.DateTime]::SpecifyKind(
+                                  [System.DateTime]::new(
                                       1900,
                                       1,
                                       1,
@@ -1646,13 +1646,13 @@ jobs:
                                       0,
                                       0
                                   ),
-                                  :Utc
+                                  [System.DateTimeKind]::Utc
                               )
 
                           if ($report.executionDate) {
                               try {
                                   $reportExecutionOffset =
-                                      :Parse(
+                                      [System.DateTimeOffset]::Parse(
                                           "$($report.executionDate)",
                                           [System.Globalization.CultureInfo]::InvariantCulture,
                                           [System.Globalization.DateTimeStyles]::AllowWhiteSpaces
@@ -1681,7 +1681,7 @@ jobs:
                           if ($report.uploadDate) {
                               try {
                                   $uploadDateOffset =
-                                      :Parse(
+                                      [System.DateTimeOffset]::Parse(
                                           "$($report.uploadDate)",
                                           [System.Globalization.CultureInfo]::InvariantCulture,
                                           [System.Globalization.DateTimeStyles]::AllowWhiteSpaces
