@@ -1454,40 +1454,37 @@ jobs:
           # Build report-history window
           # ----------------------------------------------------------
 
+          # Search the full Charlotte local calendar day
+          # containing this execution, converted to UTC.
+
+          $easternTimeZone =
+              [System.TimeZoneInfo]::FindSystemTimeZoneById(
+                  'Eastern Standard Time'
+              )
+
+          $executionLocal =
+              [System.TimeZoneInfo]::ConvertTimeFromUtc(
+                  $executionStart,
+                  $easternTimeZone
+              )
+
+          $localDayStart =
+              $executionLocal.Date
+
+          $localDayEnd =
+              $localDayStart.AddDays(1).AddSeconds(-1)
+
           $dayStart =
-              $executionStart.AddMinutes(-2)
+              [System.TimeZoneInfo]::ConvertTimeToUtc(
+                  $localDayStart,
+                  $easternTimeZone
+              )
 
-          if ($env:TASK_END_DATE) {
-              try {
-                  $executionEndOffset =
-                      [System.DateTimeOffset]::Parse(
-                          $env:TASK_END_DATE,
-                          [System.Globalization.CultureInfo]::InvariantCulture,
-                          [System.Globalization.DateTimeStyles]::AllowWhiteSpaces
-                      )
-
-                  $executionEnd =
-                      $executionEndOffset.UtcDateTime
-              }
-              catch {
-                  throw (
-                      'Unable to parse TASK_END_DATE. ' +
-                      "Value=[$env:TASK_END_DATE]. " +
-                      "Error=[$($_.Exception.Message)]"
-                  )
-              }
-
-              $dayEnd =
-                  $executionEnd.AddMinutes(5)
-          }
-          else {
-              $dayEnd =
-                  $executionStart.AddMinutes(180)
-          }
-
-          # Existing full-day logic retained.
           $dayEnd =
-              $dayStart.AddDays(1).AddSeconds(-1)
+              [System.TimeZoneInfo]::ConvertTimeToUtc(
+                  $localDayEnd,
+                  $easternTimeZone
+              )
 
           $historyStart =
               $dayStart.ToString(
